@@ -1,0 +1,305 @@
+"""
+Chat request handlers.
+Handles sending, accepting, and rejecting chat requests.
+"""
+from aiogram import Router, F, Bot
+from aiogram.types import CallbackQuery, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
+from aiogram.enums import ContentType
+
+from db.database import get_db
+from db.crud import (
+    get_user_by_telegram_id,
+    get_user_by_id,
+    get_active_chat_room_by_user,
+)
+from bot.keyboards.common import get_chat_request_keyboard
+from bot.keyboards.reply import get_chat_reply_keyboard
+from core.chat_manager import ChatManager
+from config.settings import settings
+
+router = Router()
+
+chat_manager = None
+
+
+def set_chat_manager(manager: ChatManager):
+    """Set chat manager instance."""
+    global chat_manager
+    chat_manager = manager
+
+
+@router.message(StateFilter("chat_request:waiting_message"), F.content_type == ContentType.TEXT)
+async def process_chat_request_message(message: Message, state: FSMContext):
+    """Process chat request message from user."""
+    user_id = message.from_user.id
+    request_message = message.text.strip()
+    
+    if not request_message or len(request_message) < 1:
+        await message.answer("❌ پیام نمی‌تواند خالی باشد. لطفاً پیام درخواست چت را بنویسید:")
+        return
+    
+    if len(request_message) > 500:
+        await message.answer("❌ پیام خیلی طولانی است. حداکثر 500 کاراکتر مجاز است.")
+        return
+    
+    # Get receiver_id from state
+    state_data = await state.get_data()
+    receiver_id = state_data.get("chat_request_receiver_id")
+    
+    if not receiver_id:
+        await message.answer("❌ خطا در دریافت اطلاعات گیرنده.")
+        await state.clear()
+        return
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await message.answer("❌ کاربر یافت نشد.")
+            await state.clear()
+            return
+        
+        receiver = await get_user_by_id(db_session, receiver_id)
+        if not receiver:
+            await message.answer("❌ گیرنده یافت نشد.")
+            await state.clear()
+            return
+        
+        # Generate profile_id if not exists
+        if not user.profile_id:
+            import hashlib
+            profile_id = hashlib.md5(f"user_{user.telegram_id}".encode()).hexdigest()[:12]
+            user.profile_id = profile_id
+            await db_session.commit()
+            await db_session.refresh(user)
+        
+        # Send chat request notification to receiver
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            gender_map = {"male": "پسر 🧑", "female": "دختر 👩", "other": "سایر"}
+            gender_text = gender_map.get(user.gender, user.gender or "تعیین نشده")
+            
+            user_profile_id = f"/user_{user.profile_id}"
+            
+            # Build profile info text
+            profile_info = f"💬 درخواست چت جدید!\n\n"
+            profile_info += f"👤 از: {user.username or 'نامشخص'}\n"
+            profile_info += f"⚧️ جنسیت: {gender_text}\n"
+            
+            if user.age:
+                profile_info += f"🎂 سن: {user.age}\n"
+            if user.city:
+                profile_info += f"🏙️ شهر: {user.city}\n"
+            if user.province:
+                profile_info += f"🗺️ استان: {user.province}\n"
+            
+            profile_info += f"🆔 ID: {user_profile_id}\n\n"
+            profile_info += f"💬 پیام درخواست:\n{request_message}\n\n"
+            profile_info += "آیا می‌خواهید چت را شروع کنید؟"
+            
+            # Create keyboard
+            chat_request_keyboard = get_chat_request_keyboard(user.id, user.id)
+            
+            # Send message with photo if available
+            if user.profile_image_url:
+                try:
+                    await bot.send_photo(
+                        receiver.telegram_id,
+                        photo=user.profile_image_url,
+                        caption=profile_info,
+                        reply_markup=chat_request_keyboard
+                    )
+                except Exception:
+                    # If photo fails, send text only
+                    await bot.send_message(
+                        receiver.telegram_id,
+                        profile_info,
+                        reply_markup=chat_request_keyboard
+                    )
+            else:
+                await bot.send_message(
+                    receiver.telegram_id,
+                    profile_info,
+                    reply_markup=chat_request_keyboard
+                )
+            
+            await bot.session.close()
+        except Exception as e:
+            # If bot can't send message, inform user
+            await message.answer("❌ امکان ارسال درخواست چت وجود ندارد.")
+            await state.clear()
+            break
+        
+        await message.answer(
+            f"✅ درخواست چت شما برای {receiver.username or 'کاربر'} ارسال شد.\n\n"
+            "منتظر پاسخ باشید..."
+        )
+        await state.clear()
+        break
+
+
+@router.callback_query(F.data.startswith("chat_request:accept:"))
+async def accept_chat_request(callback: CallbackQuery):
+    """Accept chat request and start chat."""
+    requester_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        requester = await get_user_by_id(db_session, requester_id)
+        if not requester:
+            await callback.answer("❌ درخواست‌دهنده یافت نشد.", show_alert=True)
+            return
+        
+        # Check if user already has an active chat
+        if chat_manager:
+            active_chat = await get_active_chat_room_by_user(db_session, user.id)
+            if active_chat:
+                await callback.answer("❌ شما در حال حاضر در یک چت فعال هستید.", show_alert=True)
+                return
+            
+            # Check if requester already has an active chat
+            requester_active_chat = await get_active_chat_room_by_user(db_session, requester.id)
+            if requester_active_chat:
+                await callback.answer("❌ این کاربر در حال حاضر در یک چت فعال است.", show_alert=True)
+                return
+            
+            # Create chat room
+            try:
+                chat_room = await chat_manager.create_chat(user.id, requester.id, db_session)
+                
+                # Chat created successfully, now notify users
+                # If notification fails, it's not critical - chat is already created
+                bot = Bot(token=settings.BOT_TOKEN)
+                notification_errors = []
+                
+                try:
+                    success_msg = "✅ چت شروع شد! اکنون می‌توانید با هم چت کنید."
+                    await bot.send_message(user.telegram_id, success_msg, reply_markup=get_chat_reply_keyboard())
+                except Exception as e:
+                    notification_errors.append(f"Failed to notify user: {e}")
+                
+                try:
+                    success_msg = "✅ چت شروع شد! اکنون می‌توانید با هم چت کنید."
+                    await bot.send_message(requester.telegram_id, success_msg, reply_markup=get_chat_reply_keyboard())
+                except Exception as e:
+                    notification_errors.append(f"Failed to notify requester: {e}")
+                
+                await bot.session.close()
+                
+                # Log notification errors but don't fail
+                if notification_errors:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Chat created but notification failed: {notification_errors}")
+                
+                # Remove keyboard from message (if possible)
+                try:
+                    await callback.message.edit_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                
+                # Show popup notification
+                await callback.answer("✅ چت شروع شد!", show_alert=True)
+                
+            except Exception as e:
+                # Only log actual chat creation errors
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error creating chat room: {e}", exc_info=True)
+                await callback.answer(f"❌ خطا در ایجاد چت: {str(e)}", show_alert=True)
+        else:
+            await callback.answer("❌ سیستم چت در دسترس نیست.", show_alert=True)
+        break
+
+
+@router.callback_query(F.data.startswith("chat_request:reject:"))
+async def reject_chat_request(callback: CallbackQuery):
+    """Reject chat request."""
+    requester_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        requester = await get_user_by_id(db_session, requester_id)
+        if not requester:
+            await callback.answer("❌ درخواست‌دهنده یافت نشد.", show_alert=True)
+            return
+        
+        # Notify requester (optional)
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            await bot.send_message(
+                requester.telegram_id,
+                f"❌ درخواست چت شما توسط {user.username or 'کاربر'} رد شد."
+            )
+            await bot.session.close()
+        except Exception:
+            pass
+        
+        # Remove keyboard from message (if possible)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        
+        # Show popup notification
+        await callback.answer("❌ درخواست چت رد شد", show_alert=True)
+        break
+
+
+@router.callback_query(F.data.startswith("chat_request:block:"))
+async def block_from_chat_request(callback: CallbackQuery):
+    """Block user from chat request."""
+    requester_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import block_user
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        requester = await get_user_by_id(db_session, requester_id)
+        if not requester:
+            await callback.answer("❌ درخواست‌دهنده یافت نشد.", show_alert=True)
+            return
+        
+        # Block the requester
+        success = await block_user(db_session, user.id, requester_id)
+        
+        if success:
+            # Notify requester (optional)
+            bot = Bot(token=settings.BOT_TOKEN)
+            try:
+                await bot.send_message(
+                    requester.telegram_id,
+                    f"🚫 شما توسط {user.username or 'کاربر'} بلاک شدید."
+                )
+                await bot.session.close()
+            except Exception:
+                pass
+            
+            # Remove keyboard from message (if possible)
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            
+            # Show popup notification
+            await callback.answer(f"🚫 {requester.username or 'کاربر'} بلاک شد", show_alert=True)
+        else:
+            await callback.answer("❌ خطا در بلاک کردن.", show_alert=True)
+        break
+

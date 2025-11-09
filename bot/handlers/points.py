@@ -1,0 +1,231 @@
+"""
+Points handler for managing user points.
+"""
+from aiogram import Router, F
+from aiogram.types import CallbackQuery
+
+from db.database import get_db
+from db.crud import get_user_by_telegram_id
+from core.points_manager import PointsManager
+from bot.keyboards.engagement import get_points_menu_keyboard, get_points_convert_keyboard, get_engagement_menu_keyboard
+from config.settings import settings
+
+router = Router()
+
+
+@router.callback_query(F.data == "points:info")
+async def points_info(callback: CallbackQuery):
+    """Show points information."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        points = await PointsManager.get_balance(user.id)
+        
+        # Get conversion rate from database (for 1 day)
+        from db.crud import get_coins_for_premium_days, get_coins_for_activity
+        coins_for_1_day = await get_coins_for_premium_days(db_session, 1)
+        if coins_for_1_day is None:
+            # Fallback to settings if not in database
+            coins_for_1_day = settings.POINTS_TO_PREMIUM_DAY
+        
+        # Get coin rewards from database
+        daily_login_coins = await get_coins_for_activity(db_session, "daily_login")
+        if daily_login_coins is None:
+            daily_login_coins = settings.POINTS_DAILY_LOGIN
+        
+        chat_success_coins = await get_coins_for_activity(db_session, "chat_success")
+        if chat_success_coins is None:
+            chat_success_coins = settings.POINTS_CHAT_SUCCESS
+        
+        mutual_like_coins = await get_coins_for_activity(db_session, "mutual_like")
+        if mutual_like_coins is None:
+            mutual_like_coins = settings.POINTS_MUTUAL_LIKE
+        
+        referral_coins = await get_coins_for_activity(db_session, "referral_referrer")
+        if referral_coins is None:
+            referral_coins = settings.POINTS_REFERRAL_REFERRER
+        
+        await callback.message.edit_text(
+            f"⭐ سکه‌ها\n\n"
+            f"💰 سکه فعلی: {points}\n\n"
+            f"💡 می‌توانی سکه‌ها را به روزهای پریمیوم تبدیل کنی!\n"
+            f"📊 نرخ تبدیل: {coins_for_1_day} سکه = 1 روز پریمیوم\n\n"
+            f"چطور سکه کسب کنم؟\n"
+            f"• ورود روزانه: {daily_login_coins} سکه\n"
+            f"• چت موفق: {chat_success_coins} سکه\n"
+            f"• لایک متقابل: {mutual_like_coins} سکه\n"
+            f"• دعوت دوستان: {referral_coins} سکه",
+            reply_markup=get_points_menu_keyboard()
+        )
+        await callback.answer()
+        break
+
+
+@router.callback_query(F.data == "points:history")
+async def points_history(callback: CallbackQuery):
+    """Show points history."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        history = await PointsManager.get_history(user.id, limit=20)
+        
+        if not history:
+            await callback.message.edit_text(
+                "📜 تاریخچه سکه‌ها\n\n"
+                "هنوز هیچ سکه‌ای دریافت نکرده‌ای!",
+                reply_markup=get_points_menu_keyboard()
+            )
+        else:
+            history_text = "📜 تاریخچه سکه‌ها\n\n"
+            for record in history[:10]:  # Show last 10
+                points_text = f"+{record.points}" if record.points > 0 else str(record.points)
+                history_text += f"{points_text} سکه - {record.source}\n"
+            
+            history_text += f"\n(نمایش آخرین 10 تراکنش)"
+            
+            await callback.message.edit_text(
+                history_text,
+                reply_markup=get_points_menu_keyboard()
+            )
+        
+        await callback.answer()
+        break
+
+
+@router.callback_query(F.data == "points:convert")
+async def points_convert_menu(callback: CallbackQuery):
+    """Show points conversion menu."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        points = await PointsManager.get_balance(user.id)
+        
+        # Get prices from database
+        from db.crud import get_coins_for_premium_days
+        price_1 = await get_coins_for_premium_days(db_session, 1)
+        price_3 = await get_coins_for_premium_days(db_session, 3)
+        price_7 = await get_coins_for_premium_days(db_session, 7)
+        price_30 = await get_coins_for_premium_days(db_session, 30)
+        
+        # If not in database, show "نامشخص"
+        price_1 = price_1 if price_1 is not None else "نامشخص"
+        price_3 = price_3 if price_3 is not None else "نامشخص"
+        price_7 = price_7 if price_7 is not None else "نامشخص"
+        price_30 = price_30 if price_30 is not None else "نامشخص"
+        
+        await callback.message.edit_text(
+            f"💎 تبدیل سکه به پریمیوم\n\n"
+            f"💰 سکه فعلی: {points}\n\n"
+            f"🎁 قیمت‌ها:\n"
+            f"• 1 روز: {price_1} سکه\n"
+            f"• 3 روز: {price_3} سکه\n"
+            f"• 7 روز: {price_7} سکه\n"
+            f"• 30 روز: {price_30} سکه\n\n"
+            f"انتخاب کن:",
+            reply_markup=get_points_convert_keyboard()
+        )
+        await callback.answer()
+        break
+
+
+@router.callback_query(F.data.startswith("points:convert:"))
+async def points_convert(callback: CallbackQuery):
+    """Convert points to premium."""
+    user_id = callback.from_user.id
+    days = int(callback.data.split(":")[-1])
+    
+    async for db_session in get_db():
+        # Get required coins from database
+        from db.crud import get_coins_for_premium_days
+        required_points = await get_coins_for_premium_days(db_session, days)
+        
+        if required_points is None:
+            # Fallback to default calculation
+            required_points = days * 200
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        current_points = await PointsManager.get_balance(user.id)
+        
+        if current_points < required_points:
+            await callback.answer(
+                f"❌ سکه کافی نیست!\n\n"
+                f"سکه فعلی: {current_points}\n"
+                f"سکه مورد نیاز: {required_points}",
+                show_alert=True
+            )
+            return
+        
+        # Spend points manually with custom amount
+        from db.crud import spend_points
+        success = await spend_points(
+            db_session,
+            user.id,
+            required_points,
+            "spent",
+            "premium_purchase",
+            f"Purchased {days} days of premium"
+        )
+        
+        if success:
+            # Grant premium days
+            from db.crud import create_premium_subscription
+            from datetime import datetime, timedelta
+            
+            now = datetime.utcnow()
+            # Calculate the duration to add
+            duration_to_add = timedelta(days=days)
+            
+            # Calculate expiration date
+            if user.premium_expires_at and user.premium_expires_at > now:
+                # Extend existing premium
+                expiration_date = user.premium_expires_at + duration_to_add
+            else:
+                # Start new premium
+                expiration_date = now + duration_to_add
+            
+            transaction_id = f"points_{user_id}_{int(now.timestamp())}"
+            subscription = await create_premium_subscription(
+                db_session,
+                user.id,
+                provider="points",
+                transaction_id=transaction_id,
+                amount=0.0,  # Free - paid with points
+                start_date=now,
+                end_date=expiration_date
+            )
+            
+            if subscription:
+                await callback.answer(
+                    f"✅ {days} روز پریمیوم دریافت کردی!",
+                    show_alert=True
+                )
+                await callback.message.edit_text(
+                    f"💎 تبدیل سکه به پریمیوم\n\n"
+                    f"✅ موفق! {days} روز پریمیوم دریافت کردی!",
+                    reply_markup=get_points_menu_keyboard()
+                )
+            else:
+                await callback.answer("❌ خطا در فعال کردن پریمیوم.", show_alert=True)
+        else:
+            await callback.answer("❌ خطا در تبدیل سکه.", show_alert=True)
+        
+        break
+

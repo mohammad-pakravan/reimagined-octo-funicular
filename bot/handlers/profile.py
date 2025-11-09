@@ -1,0 +1,458 @@
+"""
+Profile handlers for user profile interactions.
+Handles like, follow, block, report, gift, and other profile actions.
+"""
+from aiogram import Router, F, Bot
+from aiogram.types import CallbackQuery, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
+from aiogram.enums import ContentType
+
+from db.database import get_db
+from db.crud import (
+    get_user_by_telegram_id,
+    get_user_by_id,
+    like_user,
+    unlike_user,
+    is_liked,
+    follow_user,
+    unfollow_user,
+    is_following,
+    block_user,
+    unblock_user,
+    is_blocked,
+    create_report,
+    is_chat_end_notification_active,
+)
+from bot.keyboards.profile import get_profile_keyboard
+from bot.keyboards.reply import get_chat_reply_keyboard, get_main_reply_keyboard
+from core.chat_manager import ChatManager
+
+router = Router()
+
+chat_manager = None
+
+
+def set_chat_manager(manager: ChatManager):
+    """Set chat manager instance."""
+    global chat_manager
+    chat_manager = manager
+
+
+@router.callback_query(F.data.startswith("profile:like:"))
+async def handle_like(callback: CallbackQuery):
+    """Handle like/unlike action."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        # Check if already liked
+        is_liked_status = await is_liked(db_session, user.id, partner.id)
+        
+        if is_liked_status:
+            # Unlike
+            await unlike_user(db_session, user.id, partner.id)
+            await callback.answer("❤️ لایک برداشته شد")
+        else:
+            # Like
+            await like_user(db_session, user.id, partner.id)
+            await callback.answer("❤️ لایک شد!")
+        
+        # Refresh partner data
+        await db_session.refresh(partner)
+        
+        # Update keyboard
+        is_liked_status = await is_liked(db_session, user.id, partner.id)
+        is_following_status = await is_following(db_session, user.id, partner.id)
+        is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+        
+        is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
+        profile_keyboard = get_profile_keyboard(
+            partner_id=partner.id,
+            is_liked=is_liked_status,
+            is_following=is_following_status,
+            is_blocked=is_blocked_status,
+            like_count=partner.like_count or 0,
+            is_notifying=is_notifying_status
+        )
+        
+        try:
+            await callback.message.edit_reply_markup(reply_markup=profile_keyboard)
+        except:
+            pass
+        
+        break
+
+
+@router.callback_query(F.data.startswith("profile:follow:"))
+async def handle_follow(callback: CallbackQuery):
+    """Handle follow/unfollow action."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        # Check if already following
+        is_following_status = await is_following(db_session, user.id, partner.id)
+        
+        if is_following_status:
+            # Unfollow
+            await unfollow_user(db_session, user.id, partner.id)
+            await callback.answer("🚶 دنبال کردن لغو شد")
+        else:
+            # Follow
+            await follow_user(db_session, user.id, partner.id)
+            await callback.answer("✅ دنبال شد!")
+        
+        # Refresh keyboard
+        is_liked_status = await is_liked(db_session, user.id, partner.id)
+        is_following_status = await is_following(db_session, user.id, partner.id)
+        is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+        
+        is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
+        profile_keyboard = get_profile_keyboard(
+            partner_id=partner.id,
+            is_liked=is_liked_status,
+            is_following=is_following_status,
+            is_blocked=is_blocked_status,
+            like_count=partner.like_count or 0,
+            is_notifying=is_notifying_status
+        )
+        
+        try:
+            await callback.message.edit_reply_markup(reply_markup=profile_keyboard)
+        except:
+            pass
+        
+        break
+
+
+@router.callback_query(F.data.startswith("profile:block:"))
+async def handle_block(callback: CallbackQuery):
+    """Handle block action."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        if user.id == partner.id:
+            await callback.answer("❌ نمی‌توانید خودتان را بلاک کنید.", show_alert=True)
+            return
+        
+        # Block user
+        await block_user(db_session, user.id, partner.id)
+        
+        # End active chat if exists
+        if chat_manager:
+            if await chat_manager.is_chat_active(user.id, db_session):
+                from db.crud import get_active_chat_room_by_user
+                chat_room = await get_active_chat_room_by_user(db_session, user.id)
+                if chat_room:
+                    await chat_manager.end_chat(chat_room.id, db_session)
+        
+        # Re-render profile keyboard with unblock option
+        is_liked_status = await is_liked(db_session, user.id, partner.id)
+        is_following_status = await is_following(db_session, user.id, partner.id)
+        is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+        is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
+        
+        new_keyboard = get_profile_keyboard(
+            partner_id=partner.id,
+            is_liked=is_liked_status,
+            is_following=is_following_status,
+            is_blocked=is_blocked_status,
+            like_count=partner.like_count or 0,
+            is_notifying=is_notifying_status
+        )
+        
+        try:
+            await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+        except:
+            pass
+        
+        await callback.answer("🚫 کاربر بلاک شد")
+        break
+
+
+@router.callback_query(F.data.startswith("profile:unblock:"))
+async def handle_unblock(callback: CallbackQuery):
+    """Handle unblock action."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        if user.id == partner.id:
+            await callback.answer("❌ نمی‌توانید خودتان را آنبلاک کنید.", show_alert=True)
+            return
+        
+        success = await unblock_user(db_session, user.id, partner.id)
+        
+        if success:
+            # Re-render profile keyboard
+            is_liked_status = await is_liked(db_session, user.id, partner.id)
+            is_following_status = await is_following(db_session, user.id, partner.id)
+            is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+            is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
+            
+            new_keyboard = get_profile_keyboard(
+                partner_id=partner.id,
+                is_liked=is_liked_status,
+                is_following=is_following_status,
+                is_blocked=is_blocked_status,
+                like_count=partner.like_count or 0,
+                is_notifying=is_notifying_status
+            )
+            
+            try:
+                await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+            except:
+                pass
+            
+            await callback.answer("✅ آنبلاک شد.")
+        else:
+            await callback.answer("❌ خطا در آنبلاک کردن.", show_alert=True)
+        break
+
+
+@router.callback_query(F.data.startswith("profile:report:"))
+async def handle_report(callback: CallbackQuery, state: FSMContext):
+    """Handle report action."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        # For now, just create a simple report
+        # TODO: Add report types selection
+        await create_report(
+            db_session,
+            reporter_id=user.id,
+            reported_id=partner.id,
+            reason="گزارش از طریق پروفایل",
+            report_type="other"
+        )
+        
+        await callback.answer("⛔ گزارش ثبت شد. از توجه شما سپاسگزاریم.", show_alert=True)
+        
+        break
+
+
+@router.callback_query(F.data.startswith("profile:gift:"))
+async def handle_gift(callback: CallbackQuery):
+    """Handle gift action."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        # TODO: Implement gift system
+        await callback.answer("🎁 این قابلیت به زودی پیاده‌سازی خواهد شد.", show_alert=True)
+        
+        break
+
+
+@router.callback_query(F.data.startswith("profile:dm:"))
+async def handle_dm(callback: CallbackQuery, state: FSMContext):
+    """Handle direct message action - start FSM for message."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import is_blocked
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        # Check if partner has blocked user
+        partner_blocked_user = await is_blocked(db_session, partner.id, user.id)
+        if partner_blocked_user:
+            await callback.answer("❌ این کاربر شما را بلاک کرده است. امکان ارسال پیام دایرکت ندارید.", show_alert=True)
+            return
+        
+        # Set FSM state to wait for message
+        await state.update_data(dm_receiver_id=partner.id)
+        await state.set_state("dm:waiting_message")
+        
+        await callback.message.answer(
+            "✉️ پیام دایرکت\n\n"
+            "لطفاً متن پیامی که می‌خواهید ارسال کنید را بنویسید:"
+        )
+        await callback.answer()
+        break
+
+
+@router.callback_query(F.data.startswith("profile:chat_request:"))
+async def handle_chat_request(callback: CallbackQuery, state: FSMContext):
+    """Handle chat request action - start FSM for request message."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import is_blocked
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        # Check if partner has blocked user
+        partner_blocked_user = await is_blocked(db_session, partner.id, user.id)
+        if partner_blocked_user:
+            await callback.answer("❌ این کاربر شما را بلاک کرده است. امکان ارسال درخواست چت ندارید.", show_alert=True)
+            return
+        
+        # Check if user already has an active chat
+        if chat_manager:
+            from db.crud import get_active_chat_room_by_user
+            active_chat = await get_active_chat_room_by_user(db_session, user.id)
+            if active_chat:
+                await callback.answer("❌ شما در حال حاضر در یک چت فعال هستید. لطفاً ابتدا چت فعلی را پایان دهید.", show_alert=True)
+                return
+        
+        # Set FSM state to wait for request message
+        await state.update_data(chat_request_receiver_id=partner.id)
+        await state.set_state("chat_request:waiting_message")
+        
+        await callback.message.answer(
+            "💬 درخواست چت\n\n"
+            "لطفاً پیامی که می‌خواهید همراه درخواست چت ارسال کنید را بنویسید:"
+        )
+        await callback.answer()
+        break
+
+
+@router.callback_query(F.data.startswith("profile:notify_end:"))
+async def handle_notify_end(callback: CallbackQuery):
+    """Handle notify when chat ends action - toggle notification."""
+    partner_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import (
+            create_chat_end_notification,
+            delete_chat_end_notification,
+            is_chat_end_notification_active,
+        )
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        partner = await get_user_by_id(db_session, partner_id)
+        if not partner:
+            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        if user.id == partner.id:
+            await callback.answer("❌ نمی‌توانید برای خودتان تنظیم کنید.", show_alert=True)
+            return
+        
+        # Check if notification is already active
+        is_active = await is_chat_end_notification_active(db_session, user.id, partner.id)
+        
+        if is_active:
+            # Deactivate notification
+            success = await delete_chat_end_notification(db_session, user.id, partner.id)
+            if success:
+                await callback.answer("🔕 اطلاع‌رسانی غیرفعال شد.", show_alert=True)
+            else:
+                await callback.answer("❌ خطا در غیرفعال کردن اطلاع‌رسانی.", show_alert=True)
+        else:
+            # Activate notification
+            notification = await create_chat_end_notification(db_session, user.id, partner.id)
+            if notification:
+                await callback.answer("🔔 وقتی چت این کاربر تمام شد به شما اطلاع داده می‌شود.", show_alert=True)
+            else:
+                await callback.answer("❌ خطا در فعال کردن اطلاع‌رسانی.", show_alert=True)
+        
+        # Update keyboard to reflect notification status
+        is_liked_status = await is_liked(db_session, user.id, partner.id)
+        is_following_status = await is_following(db_session, user.id, partner.id)
+        is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+        is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
+        
+        profile_keyboard = get_profile_keyboard(
+            partner_id=partner.id,
+            is_liked=is_liked_status,
+            is_following=is_following_status,
+            is_blocked=is_blocked_status,
+            like_count=partner.like_count or 0,
+            is_notifying=is_notifying_status
+        )
+        
+        try:
+            await callback.message.edit_reply_markup(reply_markup=profile_keyboard)
+        except:
+            pass
+        
+        break
+

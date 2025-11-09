@@ -1,0 +1,155 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: telecaht_redis
+    ports:
+      - "6899:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - telecaht_network
+
+  mysql:
+    image: mysql:8.0
+    container_name: telecaht_mysql
+    ports:
+      - "14099:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-telecaht}
+      MYSQL_USER: ${MYSQL_USER:-telecaht_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-telecaht_pass}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./db/migration_add_profile_features.sql:/docker-entrypoint-initdb.d/migration_add_profile_features.sql
+      - ./db/migration_add_direct_messages.sql:/docker-entrypoint-initdb.d/migration_add_direct_messages.sql
+      - ./db/migration_add_chat_end_notifications.sql:/docker-entrypoint-initdb.d/migration_add_chat_end_notifications.sql
+      - ./db/migration_add_engagement_features.sql:/docker-entrypoint-initdb.d/migration_add_engagement_features.sql
+      - ./db/migration_add_admin_features.sql:/docker-entrypoint-initdb.d/migration_add_admin_features.sql
+    restart: unless-stopped
+    networks:
+      - telecaht_network
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: telecaht_phpmyadmin
+    ports:
+      - "8080:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: ${MYSQL_USER:-telecaht_user}
+      PMA_PASSWORD: ${MYSQL_PASSWORD:-telecaht_pass}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      UPLOAD_LIMIT: 300M
+    depends_on:
+      - mysql
+    restart: unless-stopped
+    networks:
+      - telecaht_network
+
+  minio:
+    image: minio/minio:latest
+    container_name: telecaht_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    networks:
+      - telecaht_network
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telecaht_bot
+    ports:
+      - "8000:8000"  # FastAPI port
+    environment:
+      # Bot configuration
+      BOT_TOKEN: ${BOT_TOKEN}
+      # Database configuration
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-telecaht_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-telecaht_pass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-telecaht}
+      # Redis configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # MinIO configuration
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-profile-images}
+      MINIO_USE_SSL: "false"
+      # Channel configuration
+      MANDATORY_CHANNEL_ID: ${MANDATORY_CHANNEL_ID}
+      # Admin configuration
+      ADMIN_IDS: ${ADMIN_IDS}
+      # FastAPI configuration
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      VIDEO_CALL_DOMAIN: ${VIDEO_CALL_DOMAIN:-http://localhost:3000}
+      VIDEO_CALL_API_URL: ${VIDEO_CALL_API_URL:-http://bot:8000}
+      VIDEO_CALL_WS_URL: ${VIDEO_CALL_WS_URL:-ws://bot:8000}
+      API_SECRET_KEY: ${API_SECRET_KEY:-your-secret-key-change-this}
+      DOCKER_ENV: "1"
+      # Premium configuration
+      PREMIUM_PRICE: ${PREMIUM_PRICE:-10000.0}
+      PREMIUM_DURATION_DAYS: ${PREMIUM_DURATION_DAYS:-30}
+      # Chat configuration
+      MAX_CHAT_DURATION_MINUTES: ${MAX_CHAT_DURATION_MINUTES:-60}
+      PREMIUM_CHAT_DURATION_MINUTES: ${PREMIUM_CHAT_DURATION_MINUTES:-180}
+      MATCHMAKING_TIMEOUT_SECONDS: ${MATCHMAKING_TIMEOUT_SECONDS:-300}
+      # Rate limiting
+      RATE_LIMIT_MESSAGES_PER_MINUTE: ${RATE_LIMIT_MESSAGES_PER_MINUTE:-20}
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+      - mysql
+      - minio
+    restart: unless-stopped
+    networks:
+      - telecaht_network
+
+  webapp:
+    build:
+      context: ./webapp
+      dockerfile: Dockerfile
+    container_name: telecaht_webapp
+    ports:
+      - "3000:80"  # Frontend port (mapped to nginx port 80)
+    environment:
+      - VITE_API_BASE_URL=${VIDEO_CALL_API_URL:-http://localhost:8000}
+      - VITE_API_WS_URL=${VIDEO_CALL_WS_URL:-ws://localhost:8000}
+    depends_on:
+      - bot
+    networks:
+      - telecaht_network
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  mysql_data:
+  minio_data:
+
+networks:
+  telecaht_network:
+    driver: bridge
+

@@ -1,0 +1,14 @@
+# Example override file for development
+# Copy this to docker-compose.override.yml and customize
+# This file is gitignored, so you can customize it locally
+
+version: '3.8'
+
+services:
+  bot:
+    environment:
+      # Override any environment variables here for local development
+      # BOT_TOKEN: your_token_here
+      # MANDATORY_CHANNEL_ID: @your_channel
+      # ADMIN_IDS: 123456789,987654321
+

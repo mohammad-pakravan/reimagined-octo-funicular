@@ -1,0 +1,36 @@
+# Telegram Bot Framework
+aiogram==3.11.0
+PyJWT==2.8.0
+aiohttp==3.9.1
+
+# Database
+sqlalchemy==2.0.25
+aiomysql==0.2.0
+pymysql==1.1.0
+
+# Redis
+redis==5.0.1
+aioredis==2.0.1
+
+# FastAPI
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Configuration
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+
+# MinIO (optional, for profile image storage)
+minio==7.2.0
+
+# Utilities
+aiohttp==3.9.1
+
+Flask==3.0.0
+flask-cors==4.0.0
+requests==2.31.0
+pymysql==1.1.0
+python-dotenv==1.0.0
+
