@@ -190,43 +190,116 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
             if link and link.is_active:
                 await record_link_signup(db_session, link.id, user.id)
         
+        # Refresh user to get latest data
+        await db_session.refresh(user)
+        
         # Check if user came from user referral link
-        if is_new_user and user_data.get("referral_code"):
             referral_code = user_data.get("referral_code")
-            from db.crud import get_referral_code_by_code, create_referral
-            from core.points_manager import PointsManager
-            from core.achievement_system import AchievementSystem
-            
+        referral_code_obj = None
+        if referral_code:
+            from db.crud import get_referral_code_by_code, create_referral, get_coins_for_activity
             referral_code_obj = await get_referral_code_by_code(db_session, referral_code)
-            if referral_code_obj:
-                # Check if user is trying to use their own code (shouldn't happen, but check anyway)
+        
+        if is_new_user and referral_code_obj:
+            # New user with referral code - create referral relationship
+            # Points will be awarded when profile is completed
                 if referral_code_obj.user_id != user.id:
                     # Create referral
-                    existing = await create_referral(
+                await create_referral(
                         db_session,
                         referral_code_obj.user_id,
                         user.id,
                         referral_code
                     )
                     
-                    if existing is not None:
-                        # Award points
-                        await PointsManager.award_referral(
+                await message.answer(
+                    f"✅ عضویت شما از طریق لینک دعوت ثبت شد!\n\n"
+                    f"💡 با تکمیل پروفایل خود (اسم، سن، شهر، تصویر)، سکه دریافت می‌کنی!"
+                )
+        
+        # Check if profile is complete (username, age, city, profile_image_url)
+        profile_complete = (
+            user.username and
+            user.age and
+            user.city and
+            user.profile_image_url
+        )
+        
+        # If profile is complete and user has a referral, award profile completion points
+        # Only for new users who registered with referral link
+        if is_new_user and profile_complete and referral_code_obj and referral_code_obj.user_id != user.id:
+            # Check if referral exists
+            from db.crud import get_referral_by_users
+            existing_referral = await get_referral_by_users(
+                db_session,
+                referral_code_obj.user_id,
+                user.id
+            )
+            
+            if existing_referral:
+                # Check if we already awarded profile completion (by checking points history)
+                from db.crud import get_points_history
+                points_history = await get_points_history(db_session, referral_code_obj.user_id, limit=100)
+                
+                # Check if profile completion reward was already given
+                already_awarded = any(
+                    ph.source == "referral_profile_complete" and ph.related_user_id == user.id
+                    for ph in points_history
+                )
+                
+                if not already_awarded:
+                    # Get coins for display
+                    coins_profile_complete = await get_coins_for_activity(db_session, "referral_profile_complete")
+                    if coins_profile_complete is None:
+                        coins_profile_complete = settings.POINTS_REFERRAL_REFERRER
+                    
+                    coins_referred = await get_coins_for_activity(db_session, "referral_referred_signup")
+                    if coins_referred is None:
+                        coins_referred = await get_coins_for_activity(db_session, "referral_referred")
+                        if coins_referred is None:
+                            coins_referred = settings.POINTS_REFERRAL_REFERRED
+                    
+                    # Award profile completion points to both users
+                    from core.points_manager import PointsManager
+                    from core.achievement_system import AchievementSystem
+                    
+                    await PointsManager.award_referral_profile_complete(
                             referral_code_obj.user_id,
                             user.id
                         )
                         
                         # Check achievements
-                        from db.crud import get_referral_count
+                    from db.crud import get_referral_count, get_user_by_id
                         referral_count = await get_referral_count(db_session, referral_code_obj.user_id)
                         await AchievementSystem.check_referral_achievement(
                             referral_code_obj.user_id,
                             referral_count
                         )
                         
+                    # Notify referrer
+                    referrer = await get_user_by_id(db_session, referral_code_obj.user_id)
+                    if referrer:
+                        from aiogram import Bot
+                        bot = Bot(token=settings.BOT_TOKEN)
+                        try:
+                            await bot.send_message(
+                                referrer.telegram_id,
+                                f"🎉 خبر خوب!\n\n"
+                                f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، پروفایلش را تکمیل کرد!\n\n"
+                                f"💰 {coins_profile_complete} سکه به حساب شما اضافه شد!\n\n"
+                                f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
+                            )
+                        except Exception:
+                            pass
+                        finally:
+                            await bot.session.close()
+                    
+                    # Notify referred user
                         await message.answer(
-                            f"✅ کد دعوت '{referral_code}' با موفقیت ثبت شد!\n\n"
-                            f"🎁 {settings.POINTS_REFERRAL_REFERRED} سکه به شما اهدا شد!"
+                        f"🎉 تبریک!\n\n"
+                        f"✅ پروفایل شما تکمیل شد!\n\n"
+                        f"💰 {coins_referred} سکه به حساب شما اضافه شد!\n\n"
+                        f"💡 با تکمیل پروفایل، سکه دریافت کردی!"
                         )
         
         # Clear registration data

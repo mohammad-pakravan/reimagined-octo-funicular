@@ -144,6 +144,39 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             # If bot can't send message (user blocked bot, etc.), still save the message
             pass
         
+        # Check and award badges for DM achievements
+        from core.achievement_system import AchievementSystem
+        from core.badge_manager import BadgeManager
+        from db.crud import get_user_dm_sent_count, get_badge_by_key
+        from aiogram import Bot as BadgeBot
+        
+        # Get DM sent count
+        dm_sent_count = await get_user_dm_sent_count(db_session, user.id)
+        
+        # Check DM achievements
+        completed_achievements = await AchievementSystem.check_dm_count_achievement(
+            user.id,
+            dm_sent_count
+        )
+        
+        # Award badges
+        badge_bot = BadgeBot(token=settings.BOT_TOKEN)
+        try:
+            for achievement in completed_achievements:
+                if achievement.achievement and achievement.achievement.badge_id:
+                    badge = await get_badge_by_key(db_session, achievement.achievement.achievement_key)
+                    if badge:
+                        await BadgeManager.award_badge_and_notify(
+                            user.id,
+                            badge.badge_key,
+                            badge_bot,
+                            user.telegram_id
+                        )
+        except Exception:
+            pass
+        finally:
+            await badge_bot.session.close()
+        
         await callback.message.edit_text(
             "✅ پیام دایرکت با موفقیت ارسال شد!\n\n"
             f"پیام شما برای {receiver.username or 'کاربر'} ارسال شد.",

@@ -192,43 +192,10 @@ async def cmd_start(message: Message):
                         user_agent=None
                     )
             elif start_param and start_param.startswith("ref_"):
-                # User referral link - process referral for existing user
-                referral_code = start_param.replace("ref_", "").upper()
-                from db.crud import get_referral_code_by_code, create_referral
-                from core.points_manager import PointsManager
-                from core.achievement_system import AchievementSystem
-                
-                referral_code_obj = await get_referral_code_by_code(db_session, referral_code)
-                if referral_code_obj:
-                    # Check if user is trying to use their own code
-                    if referral_code_obj.user_id != user.id:
-                        # Check if already referred by this user
-                        existing = await create_referral(
-                            db_session,
-                            referral_code_obj.user_id,
-                            user.id,
-                            referral_code
-                        )
-                        
-                        if existing is not None:
-                            # Award points
-                            await PointsManager.award_referral(
-                                referral_code_obj.user_id,
-                                user.id
-                            )
-                            
-                            # Check achievements
-                            from db.crud import get_referral_count
-                            referral_count = await get_referral_count(db_session, referral_code_obj.user_id)
-                            await AchievementSystem.check_referral_achievement(
-                                referral_code_obj.user_id,
-                                referral_count
-                            )
-                            
-                            await message.answer(
-                                f"✅ کد دعوت '{referral_code}' با موفقیت ثبت شد!\n\n"
-                                f"🎁 {settings.POINTS_REFERRAL_REFERRED} سکه به شما اهدا شد!"
-                            )
+                # User referral link - existing user clicked referral link
+                # Do NOT award points for existing users, only for new users during registration
+                # Just show a message that they're already registered
+                pass
             
             # Existing user - show main menu
             if user.is_banned:

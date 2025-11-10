@@ -68,6 +68,74 @@ async def handle_like(callback: CallbackQuery):
             await like_user(db_session, user.id, partner.id)
             await callback.answer("❤️ لایک شد!")
         
+            # Check and award badges for like achievements
+            from core.achievement_system import AchievementSystem
+            from core.badge_manager import BadgeManager
+            from db.crud import (
+                get_user_follow_given_count,
+                get_user_follow_received_count,
+                get_badge_by_key
+            )
+            from aiogram import Bot as BadgeBot
+            
+            # Get like counts
+            from sqlalchemy import func, select
+            from db.models import Like, Follow
+            
+            # Count likes given by user
+            like_given_result = await db_session.execute(
+                select(func.count(Like.id)).where(Like.user_id == user.id)
+            )
+            like_given_count = like_given_result.scalar() or 0
+            
+            # Check like given achievements
+            completed_achievements = await AchievementSystem.check_like_given_count_achievement(
+                user.id,
+                like_given_count
+            )
+            
+            # Award badges
+            badge_bot = BadgeBot(token=settings.BOT_TOKEN)
+            try:
+                for achievement in completed_achievements:
+                    if achievement.achievement and achievement.achievement.badge_id:
+                        badge = await get_badge_by_key(db_session, achievement.achievement.achievement_key)
+                        if badge:
+                            await BadgeManager.award_badge_and_notify(
+                                user.id,
+                                badge.badge_key,
+                                badge_bot,
+                                user.telegram_id
+                            )
+            except Exception:
+                pass
+            finally:
+                await badge_bot.session.close()
+            
+            # Check like received achievements for partner
+            partner_like_count = partner.like_count or 0
+            partner_completed = await AchievementSystem.check_like_count_achievement(
+                partner.id,
+                partner_like_count
+            )
+            
+            badge_bot2 = BadgeBot(token=settings.BOT_TOKEN)
+            try:
+                for achievement in partner_completed:
+                    if achievement.achievement and achievement.achievement.badge_id:
+                        badge = await get_badge_by_key(db_session, achievement.achievement.achievement_key)
+                        if badge:
+                            await BadgeManager.award_badge_and_notify(
+                                partner.id,
+                                badge.badge_key,
+                                badge_bot2,
+                                partner.telegram_id
+                            )
+            except Exception:
+                pass
+            finally:
+                await badge_bot2.session.close()
+        
         # Refresh partner data
         await db_session.refresh(partner)
         
@@ -122,6 +190,70 @@ async def handle_follow(callback: CallbackQuery):
             # Follow
             await follow_user(db_session, user.id, partner.id)
             await callback.answer("✅ دنبال شد!")
+            
+            # Check and award badges for follow achievements
+            from core.achievement_system import AchievementSystem
+            from core.badge_manager import BadgeManager
+            from db.crud import (
+                get_user_follow_given_count,
+                get_user_follow_received_count,
+                get_badge_by_key
+            )
+            from aiogram import Bot as BadgeBot
+            
+            # Get follow counts
+            follow_given_count = await get_user_follow_given_count(db_session, user.id)
+            follow_received_count = await get_user_follow_received_count(db_session, partner.id)
+            
+            # Check follow achievements for user
+            completed_achievements = await AchievementSystem.check_follow_count_achievement(
+                user.id,
+                follow_given_count,
+                0  # User's received follows (not relevant here)
+            )
+            
+            # Award badges for user
+            badge_bot = BadgeBot(token=settings.BOT_TOKEN)
+            try:
+                for achievement in completed_achievements:
+                    if achievement.achievement and achievement.achievement.badge_id:
+                        badge = await get_badge_by_key(db_session, achievement.achievement.achievement_key)
+                        if badge:
+                            await BadgeManager.award_badge_and_notify(
+                                user.id,
+                                badge.badge_key,
+                                badge_bot,
+                                user.telegram_id
+                            )
+            except Exception:
+                pass
+            finally:
+                await badge_bot.session.close()
+            
+            # Check follow received achievements for partner
+            partner_follow_given_count = await get_user_follow_given_count(db_session, partner.id)
+            partner_completed = await AchievementSystem.check_follow_count_achievement(
+                partner.id,
+                partner_follow_given_count,
+                follow_received_count
+            )
+            
+            badge_bot2 = BadgeBot(token=settings.BOT_TOKEN)
+            try:
+                for achievement in partner_completed:
+                    if achievement.achievement and achievement.achievement.badge_id:
+                        badge = await get_badge_by_key(db_session, achievement.achievement.achievement_key)
+                        if badge:
+                            await BadgeManager.award_badge_and_notify(
+                                partner.id,
+                                badge.badge_key,
+                                badge_bot2,
+                                partner.telegram_id
+                            )
+            except Exception:
+                pass
+            finally:
+                await badge_bot2.session.close()
         
         # Refresh keyboard
         is_liked_status = await is_liked(db_session, user.id, partner.id)

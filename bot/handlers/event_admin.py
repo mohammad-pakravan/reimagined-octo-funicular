@@ -268,7 +268,9 @@ async def process_event_type(message: Message, state: FSMContext):
             '{"multiplier": 2.0}\n\n'
             "📌 نمونه 2 - ضریب 2x فقط برای چت و ورود روزانه:\n"
             '{"multiplier": 2.0, "apply_to_sources": ["chat_success", "daily_login"]}\n\n'
-            "📌 نمونه 3 - ضریب 1.5x برای همه منابع:\n"
+            "📌 نمونه 3 - ضریب 2x فقط برای دعوت دوستان:\n"
+            '{"multiplier": 2.0, "apply_to_sources": ["referral_profile_complete"]}\n\n'
+            "📌 نمونه 4 - ضریب 1.5x برای همه منابع:\n"
             '{"multiplier": 1.5}\n\n'
             "💡 توضیحات:\n"
             "• multiplier: ضریب (مثلاً 2.0 برای 2x، 1.5 برای 1.5x)\n"
@@ -276,7 +278,8 @@ async def process_event_type(message: Message, state: FSMContext):
             "  - chat_success: چت موفق\n"
             "  - daily_login: ورود روزانه\n"
             "  - mutual_like: لایک متقابل\n"
-            "  - referral: معرفی دوستان\n"
+            "  - referral_profile_complete: تکمیل پروفایل دعوت‌شده\n"
+            "  - referral_signup: عضویت با لینک دعوت\n"
             "  - اگر خالی باشد، برای همه منابع اعمال می‌شود\n\n"
             "✅ نمونه کامل برای کپی:\n"
             '{"multiplier": 2.0, "apply_to_sources": ["chat_success", "daily_login"]}'

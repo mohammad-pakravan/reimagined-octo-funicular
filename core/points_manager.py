@@ -185,12 +185,127 @@ class PointsManager:
         return True
     
     @staticmethod
+    async def award_referral_signup(
+        referrer_id: int,
+        referred_id: int
+    ) -> bool:
+        """
+        Award points for referral signup (when user starts the bot via referral link).
+        
+        Args:
+            referrer_id: User who referred
+            referred_id: User who was referred
+            
+        Returns:
+            True if successful
+        """
+        # Get coins from database
+        async for db_session in get_db():
+            coins_referrer = await get_coins_for_activity(db_session, "referral_signup")
+            if coins_referrer is None:
+                coins_referrer = settings.POINTS_REFERRAL_REFERRER  # Fallback to settings
+            
+            coins_referred = await get_coins_for_activity(db_session, "referral_referred_signup")
+            if coins_referred is None:
+                coins_referred = settings.POINTS_REFERRAL_REFERRED  # Fallback to settings
+            break
+        
+        # Check for event referral reward first (premium days)
+        event_reward_given = await EventEngine.handle_referral_reward(referrer_id, referred_id)
+        
+        # Award points to referrer (if event didn't give premium, still give points)
+        if not event_reward_given:
+            await PointsManager.award_points(
+                referrer_id,
+                coins_referrer,
+                "referral_signup",
+                "Referral signup reward",
+                referred_id
+            )
+        
+        # Award points to referred user
+        await PointsManager.award_points(
+            referred_id,
+            coins_referred,
+            "referral_signup",
+            "Welcome reward for using referral link",
+            referrer_id
+        )
+        
+        # Track challenge progress
+        await EventEngine.track_challenge_progress(referrer_id, "referral_count", 1)
+        
+        return True
+    
+    @staticmethod
+    async def award_referral_profile_complete(
+        referrer_id: int,
+        referred_id: int
+    ) -> bool:
+        """
+        Award points to both referrer and referred user when referred user completes their profile.
+        Profile is considered complete when username, age, city, and profile_image_url are set.
+        
+        Args:
+            referrer_id: User who referred
+            referred_id: User who completed their profile
+            
+        Returns:
+            True if successful
+        """
+        # Get coins from database
+        async for db_session in get_db():
+            coins_referrer = await get_coins_for_activity(db_session, "referral_profile_complete")
+            if coins_referrer is None:
+                # Fallback: use old referral_referrer setting or default
+                coins_referrer = await get_coins_for_activity(db_session, "referral_referrer")
+                if coins_referrer is None:
+                    coins_referrer = settings.POINTS_REFERRAL_REFERRER
+            
+            # Get coins for referred user (use referral_referred_signup or referral_referred)
+            coins_referred = await get_coins_for_activity(db_session, "referral_referred_signup")
+            if coins_referred is None:
+                coins_referred = await get_coins_for_activity(db_session, "referral_referred")
+                if coins_referred is None:
+                    coins_referred = settings.POINTS_REFERRAL_REFERRED
+            break
+        
+        # Check for event referral reward first (premium days)
+        event_reward_given = await EventEngine.handle_referral_reward(referrer_id, referred_id)
+        
+        # Award points to referrer (if event didn't give premium, still give points)
+        if not event_reward_given:
+            await PointsManager.award_points(
+                referrer_id,
+                coins_referrer,
+                "referral_profile_complete",
+                "Referral profile completion reward",
+                referred_id
+            )
+        
+        # Award points to referred user
+        await PointsManager.award_points(
+            referred_id,
+            coins_referred,
+            "referral_profile_complete",
+            "Profile completion reward for using referral link",
+            referrer_id
+        )
+        
+        # Track challenge progress
+        await EventEngine.track_challenge_progress(referrer_id, "referral_count", 1)
+        
+        return True
+    
+    @staticmethod
     async def award_referral(
         referrer_id: int,
         referred_id: int
     ) -> bool:
         """
-        Award points for referral.
+        Award points for referral (legacy method, kept for backward compatibility).
+        This method is deprecated. Use award_referral_signup instead.
+        
         Also checks for event referral rewards (premium days).
         
         Args:

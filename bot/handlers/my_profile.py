@@ -33,6 +33,104 @@ from utils.validators import validate_age, parse_age, validate_city
 router = Router()
 
 
+async def check_and_notify_profile_completion(db_session, user_id: int):
+    """Check if profile is complete and notify referrer if needed."""
+    from db.crud import get_user_by_telegram_id, get_points_history, get_coins_for_activity
+    from core.points_manager import PointsManager
+    from config.settings import settings
+    
+    # Get user
+    user = await get_user_by_telegram_id(db_session, user_id)
+    if not user:
+        return
+    
+    # Check if profile is complete (username, age, city, profile_image_url)
+    profile_complete = (
+        user.username and
+        user.age and
+        user.city and
+        user.profile_image_url
+    )
+    
+    if not profile_complete:
+        return
+    
+    # Find referral for this user (get all referrals where this user is referred)
+    from sqlalchemy import select
+    from db.models import Referral
+    result = await db_session.execute(
+        select(Referral).where(Referral.referred_id == user.id)
+    )
+    referrals = result.scalars().all()
+    
+    if not referrals:
+        return
+    
+    # Use the first referral (should only be one)
+    referral = referrals[0]
+    
+    # Check if we already awarded profile completion
+    points_history = await get_points_history(db_session, referral.referrer_id, limit=100)
+    already_awarded = any(
+        ph.source == "referral_profile_complete" and ph.related_user_id == user.id
+        for ph in points_history
+    )
+    
+    if already_awarded:
+        return
+    
+    # Get coins for display
+    coins_profile_complete = await get_coins_for_activity(db_session, "referral_profile_complete")
+    if coins_profile_complete is None:
+        coins_profile_complete = settings.POINTS_REFERRAL_REFERRER
+    
+    coins_referred = await get_coins_for_activity(db_session, "referral_referred_signup")
+    if coins_referred is None:
+        coins_referred = await get_coins_for_activity(db_session, "referral_referred")
+        if coins_referred is None:
+            coins_referred = settings.POINTS_REFERRAL_REFERRED
+    
+    # Award profile completion points to both users
+    await PointsManager.award_referral_profile_complete(
+        referral.referrer_id,
+        user.id
+    )
+    
+    # Notify referrer and referred user
+    from db.crud import get_user_by_id
+    referrer = await get_user_by_id(db_session, referral.referrer_id)
+    
+    from aiogram import Bot
+    bot = Bot(token=settings.BOT_TOKEN)
+    try:
+        # Notify referrer
+        if referrer:
+            try:
+                await bot.send_message(
+                    referrer.telegram_id,
+                    f"🎉 خبر خوب!\n\n"
+                    f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، پروفایلش را تکمیل کرد!\n\n"
+                    f"💰 {coins_profile_complete} سکه به حساب شما اضافه شد!\n\n"
+                    f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
+                )
+            except Exception:
+                pass
+        
+        # Notify referred user
+        try:
+            await bot.send_message(
+                user.telegram_id,
+                f"🎉 تبریک!\n\n"
+                f"✅ پروفایل شما تکمیل شد!\n\n"
+                f"💰 {coins_referred} سکه به حساب شما اضافه شد!\n\n"
+                f"💡 با تکمیل پروفایل، سکه دریافت کردی!"
+            )
+        except Exception:
+            pass
+    finally:
+        await bot.session.close()
+
+
 class MyProfileEditStates(StatesGroup):
     """FSM states for editing my profile."""
     waiting_new_photo = State()
@@ -60,6 +158,10 @@ async def view_my_profile(callback: CallbackQuery):
         # Generate user ID
         user_unique_id = f"/user_{user.profile_id or 'unknown'}"
         
+        # Get user badges
+        from core.badge_manager import BadgeManager
+        user_badges_display = await BadgeManager.get_user_badges_display(user.id, limit=5)
+        
         profile_text = (
             f"📊 پروفایل من\n\n"
             f"• نام: {user.username or 'تعیین نشده'}\n"
@@ -68,8 +170,13 @@ async def view_my_profile(callback: CallbackQuery):
             f"• شهر: {user.city or 'تعیین نشده'}\n"
             f"• سن: {user.age or 'تعیین نشده'}\n"
             f"• پریمیوم: {'✅ فعال' if user.is_premium else '❌ غیرفعال'}\n"
-            f"ID: {user_unique_id}"
         )
+        
+        # Add badges if available
+        if user_badges_display:
+            profile_text += f"• مدال‌ها: {user_badges_display}\n"
+        
+        profile_text += f"ID: {user_unique_id}"
         
         profile_keyboard = get_my_profile_keyboard()
         
@@ -127,6 +234,9 @@ async def process_new_photo(message: Message, state: FSMContext):
             profile_image_url=file_id
         )
         
+        # Check if profile is complete and notify referrer
+        await check_and_notify_profile_completion(db_session, user_id)
+        
         await message.answer(
             "✅ عکس پروفایل به‌روزرسانی شد!",
             reply_markup=get_main_reply_keyboard()
@@ -169,6 +279,9 @@ async def process_new_city(message: Message, state: FSMContext):
             user_id,
             city=new_city
         )
+        
+        # Check if profile is complete and notify referrer
+        await check_and_notify_profile_completion(db_session, user_id)
         
         await message.answer(
             f"✅ شهر به {new_city} تغییر یافت!",
@@ -254,6 +367,9 @@ async def process_new_age(message: Message, state: FSMContext):
             age=age
         )
         
+        # Check if profile is complete and notify referrer
+        await check_and_notify_profile_completion(db_session, user_id)
+        
         await message.answer(
             f"✅ سن به {age} سال تغییر یافت!",
             reply_markup=get_main_reply_keyboard()
@@ -338,6 +454,9 @@ async def process_new_username(message: Message, state: FSMContext):
             user_id,
             username=new_username
         )
+        
+        # Check if profile is complete and notify referrer
+        await check_and_notify_profile_completion(db_session, user_id)
         
         await message.answer(
             f"✅ نام کاربری به {new_username} تغییر یافت!",
@@ -846,6 +965,10 @@ async def back_to_my_profile(callback: CallbackQuery):
         
         user_unique_id = f"/user_{user.profile_id or 'unknown'}"
         
+        # Get user badges
+        from core.badge_manager import BadgeManager
+        user_badges_display = await BadgeManager.get_user_badges_display(user.id, limit=5)
+        
         profile_text = (
             f"📊 پروفایل من\n\n"
             f"• نام: {user.username or 'تعیین نشده'}\n"
@@ -854,8 +977,13 @@ async def back_to_my_profile(callback: CallbackQuery):
             f"• شهر: {user.city or 'تعیین نشده'}\n"
             f"• سن: {user.age or 'تعیین نشده'}\n"
             f"• پریمیوم: {'✅ فعال' if user.is_premium else '❌ غیرفعال'}\n"
-            f"ID: {user_unique_id}"
         )
+        
+        # Add badges if available
+        if user_badges_display:
+            profile_text += f"• مدال‌ها: {user_badges_display}\n"
+        
+        profile_text += f"ID: {user_unique_id}"
         
         profile_keyboard = get_my_profile_keyboard()
         

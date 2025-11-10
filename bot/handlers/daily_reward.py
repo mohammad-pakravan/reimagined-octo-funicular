@@ -9,6 +9,7 @@ from db.crud import get_user_by_telegram_id
 from core.reward_system import RewardSystem
 from bot.keyboards.engagement import get_daily_reward_keyboard, get_engagement_menu_keyboard
 from bot.keyboards.common import get_main_menu_keyboard
+from config.settings import settings
 
 router = Router()
 
@@ -32,37 +33,51 @@ async def engagement_menu(callback: CallbackQuery):
         is_premium = await check_user_premium(db_session, user.id)
         points = await PointsManager.get_balance(user.id)
         
+        # Get user medals
+        from core.badge_manager import BadgeManager
+        user_badges = await BadgeManager.get_user_badges_list(user.id, limit=5)
+        medals_count = len(await BadgeManager.get_user_badges_list(user.id))
+        
+        # Format medals display
+        medals_display = ""
+        if user_badges:
+            medal_icons = [ub.badge.badge_icon or "🏆" for ub in user_badges]
+            medals_display = f"\n🏅 مدال‌های شما: {' '.join(medal_icons)}"
+            if medals_count > 5:
+                medals_display += f" (+{medals_count - 5} مدال دیگر)"
+        
         if is_premium:
             expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "هرگز"
             text = (
                 f"💎 پریمیوم و پاداش‌ها\n\n"
                 f"✅ وضعیت پریمیوم: فعال\n"
                 f"📅 تاریخ انقضا: {expires_at}\n\n"
-                f"💰 سکه‌های شما: {points}\n\n"
-                f"💡 می‌توانی سکه‌ها را ذخیره کنی و بعداً برای تمدید پریمیوم استفاده کنی!\n\n"
+                f"💰 سکه‌های شما: {points}\n"
+            )
+            if medals_display:
+                text += medals_display
+            text += (
+                f"\n\n💡 می‌توانی سکه‌ها را ذخیره کنی و بعداً برای تمدید پریمیوم استفاده کنی!\n\n"
                 f"از منوی زیر انتخاب کنید:"
             )
         else:
-            # Get conversion rates from database
-            from db.crud import get_coins_for_premium_days
-            coins_1_day = await get_coins_for_premium_days(db_session, 1)
-            coins_30_days = await get_coins_for_premium_days(db_session, 30)
-            
-            # Fallback to settings if not in database
-            if coins_1_day is None:
-                coins_1_day = 200
-            if coins_30_days is None:
-                coins_30_days = 3000
-            
             text = (
                 f"💎 پریمیوم و پاداش‌ها\n\n"
-                f"💰 سکه‌های شما: {points}\n\n"
-                f"🎯 راه‌های دریافت پریمیوم:\n"
-                f"1️⃣ 💎 تبدیل سکه به پریمیوم (اولویت)\n"
-                f"   • {coins_1_day} سکه = 1 روز\n"
-                f"   • {coins_30_days} سکه = 1 ماه\n\n"
-                f"2️⃣ 💳 خرید مستقیم\n"
-                f"   • {settings.PREMIUM_PRICE} تومان = {settings.PREMIUM_DURATION_DAYS} روز\n\n"
+                f"💰 سکه‌های شما: {points}\n"
+            )
+            if medals_display:
+                text += medals_display
+            text += (
+                f"\n\n🎯 راه‌های دریافت پریمیوم:\n"
+                f"1️⃣ ⭐ خرید با استارز تلگرام\n"
+                f"2️⃣ 💳 خرید با شاپرک\n"
+                f"3️⃣ 💎 تبدیل سکه به پریمیوم\n\n"
+                f"✨ چرا پریمیوم بهتره؟\n"
+                f"• اولویت در صف جستجو\n"
+                f"• چت رایگان (بدون کسر سکه)\n"
+                f"• مدت زمان چت بیشتر\n"
+                f"• امکانات ویژه و بیشتر\n"
+                f"• پشتیبانی اولویت‌دار\n\n"
                 f"💡 با تعامل با ربات (پاداش روزانه، چت، دعوت دوستان) سکه کسب کن و پریمیوم بگیر!\n\n"
                 f"از منوی زیر انتخاب کنید:"
             )
@@ -99,6 +114,38 @@ async def claim_daily_reward(callback: CallbackQuery):
         if not reward_info:
             await callback.answer("❌ خطا در دریافت پاداش.", show_alert=True)
             return
+        
+        # Check and award badges for streak achievements
+        from core.achievement_system import AchievementSystem
+        from core.badge_manager import BadgeManager
+        from db.crud import get_badge_by_key
+        from aiogram import Bot as BadgeBot
+        
+        streak_count = reward_info.get('streak_count', 0)
+        
+        # Check streak achievements
+        completed_achievements = await AchievementSystem.check_streak_achievement(
+            user.id,
+            streak_count
+        )
+        
+        # Award badges
+        badge_bot = BadgeBot(token=settings.BOT_TOKEN)
+        try:
+            for achievement in completed_achievements:
+                if achievement.achievement and achievement.achievement.badge_id:
+                    badge = await get_badge_by_key(db_session, achievement.achievement.achievement_key)
+                    if badge:
+                        await BadgeManager.award_badge_and_notify(
+                            user.id,
+                            badge.badge_key,
+                            badge_bot,
+                            user.telegram_id
+                        )
+        except Exception:
+            pass
+        finally:
+            await badge_bot.session.close()
         
         if reward_info.get('already_claimed'):
             await callback.message.edit_text(

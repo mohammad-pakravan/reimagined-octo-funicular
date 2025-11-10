@@ -128,21 +128,6 @@ services:
     networks:
       - telecaht_network
 
-  webapp:
-    build:
-      context: ./webapp
-      dockerfile: Dockerfile
-    container_name: telecaht_webapp
-    ports:
-      - "3000:80"  # Frontend port (mapped to nginx port 80)
-    environment:
-      - VITE_API_BASE_URL=${VIDEO_CALL_API_URL:-http://localhost:8000}
-      - VITE_API_WS_URL=${VIDEO_CALL_WS_URL:-ws://localhost:8000}
-    depends_on:
-      - bot
-    networks:
-      - telecaht_network
-    restart: unless-stopped
 
 volumes:
   redis_data:

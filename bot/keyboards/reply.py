@@ -12,26 +12,32 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardBuilder()
     
     keyboard.add(KeyboardButton(text="💬 شروع چت"))
-    keyboard.add(KeyboardButton(text="📹 چت تصویری ناشناس"))
-    keyboard.add(KeyboardButton(text="📞 چت صوتی ناشناس"))
     keyboard.add(KeyboardButton(text="📊 پروفایل من"))
     keyboard.add(KeyboardButton(text="💎 پریمیوم"))
     keyboard.add(KeyboardButton(text="🎁 پاداش‌ها و تعامل"))
     
-    keyboard.adjust(1, 2, 2, 1)
+    keyboard.adjust(1, 2, 1)
     return keyboard.as_markup(resize_keyboard=True, persistent=True)
 
 
-def get_chat_reply_keyboard() -> ReplyKeyboardMarkup:
-    """Get reply keyboard for active chat."""
+def get_chat_reply_keyboard(private_mode: bool = False) -> ReplyKeyboardMarkup:
+    """
+    Get reply keyboard for active chat.
+    
+    Args:
+        private_mode: Whether private mode is currently enabled
+    """
     keyboard = ReplyKeyboardBuilder()
     
     keyboard.add(KeyboardButton(text="👤 پروفایل مخاطب"))
-    keyboard.add(KeyboardButton(text="📹 شروع تماس تصویری"))
-    keyboard.add(KeyboardButton(text="📞 شروع تماس صوتی"))
+    # Update button text based on private mode status
+    if private_mode:
+        keyboard.add(KeyboardButton(text="🔓 غیرفعال کردن حالت خصوصی"))
+    else:
+        keyboard.add(KeyboardButton(text="🔒 فعال کردن حالت خصوصی"))
     keyboard.add(KeyboardButton(text="❌ قطع مکالمه"))
     
-    keyboard.adjust(2, 2)
+    keyboard.adjust(2, 1)
     return keyboard.as_markup(resize_keyboard=True, persistent=True)
 
 

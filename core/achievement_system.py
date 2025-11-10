@@ -97,16 +97,36 @@ class AchievementSystem:
             if achievement and achievement.is_completed:
                 completed.append(achievement)
         
+        # Check chat_100 achievement
+        if chat_count >= 100:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "chat_100",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check chat_500 achievement
+        if chat_count >= 500:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "chat_500",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
         return completed
     
     @staticmethod
     async def check_like_count_achievement(user_id: int, like_count: int) -> List[UserAchievement]:
         """
-        Check like count achievements.
+        Check like count achievements (received likes).
         
         Args:
             user_id: User ID
-            like_count: Current like count
+            like_count: Current like count (received)
             
         Returns:
             List of completed achievements
@@ -138,6 +158,52 @@ class AchievementSystem:
             achievement = await AchievementSystem.check_and_update_achievement(
                 user_id,
                 "like_500",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check like_received_1000 achievement
+        if like_count >= 1000:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "like_received_1000",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        return completed
+    
+    @staticmethod
+    async def check_like_given_count_achievement(user_id: int, like_given_count: int) -> List[UserAchievement]:
+        """
+        Check like given count achievements.
+        
+        Args:
+            user_id: User ID
+            like_given_count: Current like given count
+            
+        Returns:
+            List of completed achievements
+        """
+        completed = []
+        
+        # Check like_given_50 achievement
+        if like_given_count >= 50:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "like_given_50",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check like_given_200 achievement
+        if like_given_count >= 200:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "like_given_200",
                 1
             )
             if achievement and achievement.is_completed:
@@ -179,6 +245,26 @@ class AchievementSystem:
             if achievement and achievement.is_completed:
                 completed.append(achievement)
         
+        # Check streak_100 achievement
+        if streak_count >= 100:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "streak_100",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check streak_365 achievement
+        if streak_count >= 365:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "streak_365",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
         return completed
     
     @staticmethod
@@ -214,6 +300,175 @@ class AchievementSystem:
             )
             if achievement and achievement.is_completed:
                 completed.append(achievement)
+        
+        # Check referral_50 achievement
+        if referral_count >= 50:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "referral_50",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check referral_100 achievement
+        if referral_count >= 100:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "referral_100",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        return completed
+    
+    @staticmethod
+    async def check_follow_count_achievement(user_id: int, follow_given_count: int, follow_received_count: int) -> List[UserAchievement]:
+        """
+        Check follow count achievements.
+        
+        Args:
+            user_id: User ID
+            follow_given_count: Number of follows given
+            follow_received_count: Number of follows received
+            
+        Returns:
+            List of completed achievements
+        """
+        completed = []
+        
+        # Check follow_given_20 achievement
+        if follow_given_count >= 20:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "follow_given_20",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check follow_received_50 achievement
+        if follow_received_count >= 50:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "follow_received_50",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check follow_received_200 achievement
+        if follow_received_count >= 200:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "follow_received_200",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        return completed
+    
+    @staticmethod
+    async def check_dm_count_achievement(user_id: int, dm_sent_count: int) -> List[UserAchievement]:
+        """
+        Check direct message count achievements.
+        
+        Args:
+            user_id: User ID
+            dm_sent_count: Number of direct messages sent
+            
+        Returns:
+            List of completed achievements
+        """
+        completed = []
+        
+        # Check dm_sent_50 achievement
+        if dm_sent_count >= 50:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "dm_sent_50",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check dm_sent_200 achievement
+        if dm_sent_count >= 200:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "dm_sent_200",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        return completed
+    
+    @staticmethod
+    async def check_message_count_achievement(user_id: int, message_count: int) -> List[UserAchievement]:
+        """
+        Check message count achievements (messages sent in chats).
+        
+        Args:
+            user_id: User ID
+            message_count: Number of messages sent in chats
+            
+        Returns:
+            List of completed achievements
+        """
+        completed = []
+        
+        # Check message_1000 achievement
+        if message_count >= 1000:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "message_1000",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Check message_10000 achievement
+        if message_count >= 10000:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "message_10000",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        return completed
+    
+    @staticmethod
+    async def check_premium_achievement(user_id: int, premium_days: int) -> List[UserAchievement]:
+        """
+        Check premium achievements.
+        
+        Args:
+            user_id: User ID
+            premium_days: Total premium days user has had
+            
+        Returns:
+            List of completed achievements
+        """
+        completed = []
+        
+        # Check premium_1_year achievement (365 days)
+        if premium_days >= 365:
+            achievement = await AchievementSystem.check_and_update_achievement(
+                user_id,
+                "premium_1_year",
+                1
+            )
+            if achievement and achievement.is_completed:
+                completed.append(achievement)
+        
+        # Note: premium_lifetime would need special handling
+        # For now, we'll check if user has premium_expires_at far in the future
+        # This can be improved later
         
         return completed
     

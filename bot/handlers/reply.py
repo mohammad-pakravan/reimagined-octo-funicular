@@ -71,6 +71,10 @@ async def my_profile_button(message: Message):
             # Generate user ID
             user_unique_id = f"/user_{user.profile_id or 'unknown'}"
             
+            # Get user badges
+            from core.badge_manager import BadgeManager
+            user_badges_display = await BadgeManager.get_user_badges_display(user.id, limit=5)
+            
             profile_text = (
                 f"📊 پروفایل من\n\n"
                 f"• نام: {user.username or 'تعیین نشده'}\n"
@@ -79,8 +83,13 @@ async def my_profile_button(message: Message):
                 f"• شهر: {user.city or 'تعیین نشده'}\n"
                 f"• سن: {user.age or 'تعیین نشده'}\n"
                 f"• پریمیوم: {'✅ فعال' if user.is_premium else '❌ غیرفعال'}\n"
-                f"ID: {user_unique_id}"
             )
+            
+            # Add badges if available
+            if user_badges_display:
+                profile_text += f"• مدال‌ها: {user_badges_display}\n"
+            
+            profile_text += f"ID: {user_unique_id}"
             
             from bot.keyboards.my_profile import get_my_profile_keyboard
             profile_keyboard = get_my_profile_keyboard()
@@ -158,10 +167,17 @@ async def partner_profile_button(message: Message):
             break
         
         # Get like, follow, block status
-        from db.crud import is_liked, is_following, is_blocked
+        from db.crud import is_liked, is_following, is_blocked, get_chat_end_notifications_for_user, check_user_premium
         is_liked_status = await is_liked(db_session, user.id, partner.id)
         is_following_status = await is_following(db_session, user.id, partner.id)
         is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+        
+        # Get notification status
+        notifications = await get_chat_end_notifications_for_user(db_session, user.id)
+        is_notifying_status = any(n.watched_user_id == partner.id for n in notifications) if notifications else False
+        
+        # Check partner premium status
+        partner_premium = await check_user_premium(db_session, partner.id)
         
         # Display partner profile
         gender_map = {"male": "پسر 🧑", "female": "دختر 👩", "other": "سایر"}
@@ -179,15 +195,9 @@ async def partner_profile_button(message: Message):
         
         user_unique_id = f"/user_{partner.profile_id or 'unknown'}"
         
-        # Calculate distance (simplified - based on same province/city)
-        distance = "نامشخص"
-        if user.city and partner.city and user.province and partner.province:
-            if user.city == partner.city:
-                distance = "همشهری"
-            elif user.province == partner.province:
-                distance = "هم‌استان"
-            else:
-                distance = "شهرهای مختلف"
+        # Get partner badges
+        from core.badge_manager import BadgeManager
+        partner_badges_display = await BadgeManager.get_user_badges_display(partner.id, limit=5)
         
         profile_text = (
             f"• نام: {partner.username or 'تعیین نشده'}\n"
@@ -195,9 +205,14 @@ async def partner_profile_button(message: Message):
             f"• استان: {partner.province or 'تعیین نشده'}\n"
             f"• شهر: {partner.city or 'تعیین نشده'}\n"
             f"• سن: {partner.age or 'تعیین نشده'}\n"
-            f"ID: {user_unique_id}\n"
-            f"فاصله : {distance}"
+            f"• پریمیوم: {'✅ فعال' if partner_premium else '❌ غیرفعال'}\n"
         )
+        
+        # Add badges if available
+        if partner_badges_display:
+            profile_text += f"• مدال‌ها: {partner_badges_display}\n"
+        
+        profile_text += f"ID: {user_unique_id}"
         
         # Get profile keyboard
         from bot.keyboards.profile import get_profile_keyboard
@@ -229,6 +244,28 @@ async def partner_profile_button(message: Message):
                 await message.answer(profile_text, reply_markup=profile_keyboard)
         else:
             await message.answer(profile_text, reply_markup=profile_keyboard)
+        
+        # Notify partner that their profile was viewed
+        try:
+            from aiogram import Bot as NotifyBot
+            from config.settings import settings
+            from db.crud import get_active_chat_room_by_user
+            
+            # Check if chat is still active
+            chat_room = await get_active_chat_room_by_user(db_session, user.id)
+            if chat_room and chat_room.is_active:
+                notify_bot = NotifyBot(token=settings.BOT_TOKEN)
+                try:
+                    await notify_bot.send_message(
+                        partner.telegram_id,
+                        "👁️ مخاطبت پروفایلت رو مشاهده کرد!",
+                        reply_markup=get_chat_reply_keyboard()
+                    )
+                    await notify_bot.session.close()
+                except Exception:
+                    pass  # Partner might have blocked the bot or left chat
+        except Exception:
+            pass  # Don't fail if notification fails
         
         break
 
@@ -343,6 +380,65 @@ async def start_voice_call_button(message: Message):
         except Exception as e:
             pass
         
+        break
+
+
+@router.message(F.text.in_({"🔒 حالت خصوصی", "🔒 فعال کردن حالت خصوصی", "🔓 غیرفعال کردن حالت خصوصی"}))
+async def toggle_private_mode_button(message: Message):
+    """Handle 'Private Mode' reply button."""
+    user_id = message.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import get_user_by_telegram_id, get_active_chat_room_by_user
+        from bot.handlers.chat import chat_manager as chat_mgr
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await message.answer(
+                "❌ پروفایل شما یافت نشد. لطفاً /start را بزنید.",
+                reply_markup=get_chat_reply_keyboard()
+            )
+            break
+        
+        # Check if user has active chat
+        if not chat_mgr or not await chat_mgr.is_chat_active(user.id, db_session):
+            await message.answer(
+                "❌ شما در حال حاضر یک چت فعال ندارید!",
+                reply_markup=get_main_reply_keyboard()
+            )
+            break
+        
+        # Get chat room
+        chat_room = await get_active_chat_room_by_user(db_session, user.id)
+        if not chat_room:
+            await message.answer(
+                "❌ چت فعالی یافت نشد.",
+                reply_markup=get_chat_reply_keyboard()
+            )
+            break
+        
+        # Get current private mode status
+        current_private_mode = await chat_mgr.get_private_mode(chat_room.id, user.id)
+        
+        # Toggle private mode
+        new_private_mode = not current_private_mode
+        await chat_mgr.set_private_mode(chat_room.id, user.id, new_private_mode)
+        
+        # Update keyboard with new private mode status
+        updated_keyboard = get_chat_reply_keyboard(private_mode=new_private_mode)
+        
+        if new_private_mode:
+            await message.answer(
+                "🔒 حالت خصوصی فعال شد!\n\n"
+                "از این به بعد پیام‌های شما غیرقابل فوروارد و ذخیره هستند.",
+                reply_markup=updated_keyboard
+            )
+        else:
+            await message.answer(
+                "🔓 حالت خصوصی غیرفعال شد!\n\n"
+                "پیام‌های شما قابل فوروارد و ذخیره هستند.",
+                reply_markup=updated_keyboard
+            )
         break
 
 
@@ -508,26 +604,51 @@ async def engagement_button(message: Message):
         is_premium = await check_user_premium(db_session, user.id)
         points = await PointsManager.get_balance(user.id)
         
+        # Get user medals
+        from core.badge_manager import BadgeManager
+        user_badges = await BadgeManager.get_user_badges_list(user.id, limit=5)
+        medals_count = len(await BadgeManager.get_user_badges_list(user.id))
+        
+        # Format medals display
+        medals_display = ""
+        if user_badges:
+            medal_icons = [ub.badge.badge_icon or "🏆" for ub in user_badges]
+            medals_display = f"\n🏅 مدال‌های شما: {' '.join(medal_icons)}"
+            if medals_count > 5:
+                medals_display += f" (+{medals_count - 5} مدال دیگر)"
+        
         if is_premium:
             expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "هرگز"
             text = (
                 f"💎 پریمیوم و پاداش‌ها\n\n"
                 f"✅ وضعیت پریمیوم: فعال\n"
                 f"📅 تاریخ انقضا: {expires_at}\n\n"
-                f"💰 سکه‌های شما: {points}\n\n"
-                f"💡 می‌توانی سکه‌ها را ذخیره کنی و بعداً برای تمدید پریمیوم استفاده کنی!\n\n"
+                f"💰 سکه‌های شما: {points}\n"
+            )
+            if medals_display:
+                text += medals_display
+            text += (
+                f"\n\n💡 می‌توانی سکه‌ها را ذخیره کنی و بعداً برای تمدید پریمیوم استفاده کنی!\n\n"
                 f"از منوی زیر انتخاب کنید:"
             )
         else:
             text = (
                 f"💎 پریمیوم و پاداش‌ها\n\n"
-                f"💰 سکه‌های شما: {points}\n\n"
-                f"🎯 راه‌های دریافت پریمیوم:\n"
-                f"1️⃣ 💎 تبدیل سکه به پریمیوم (اولویت)\n"
-                f"   • 200 سکه = 1 روز\n"
-                f"   • 3000 سکه = 1 ماه\n\n"
-                f"2️⃣ 💳 خرید مستقیم\n"
-                f"   • {settings.PREMIUM_PRICE} تومان = {settings.PREMIUM_DURATION_DAYS} روز\n\n"
+                f"💰 سکه‌های شما: {points}\n"
+            )
+            if medals_display:
+                text += medals_display
+            text += (
+                f"\n\n🎯 راه‌های دریافت پریمیوم:\n"
+                f"1️⃣ ⭐ خرید با استارز تلگرام\n"
+                f"2️⃣ 💳 خرید با شاپرک\n"
+                f"3️⃣ 💎 تبدیل سکه به پریمیوم\n\n"
+                f"✨ چرا پریمیوم بهتره؟\n"
+                f"• اولویت در صف جستجو\n"
+                f"• چت رایگان (بدون کسر سکه)\n"
+                f"• مدت زمان چت بیشتر\n"
+                f"• امکانات ویژه و بیشتر\n"
+                f"• پشتیبانی اولویت‌دار\n\n"
                 f"💡 با تعامل با ربات (پاداش روزانه، چت، دعوت دوستان) سکه کسب کن و پریمیوم بگیر!\n\n"
                 f"از منوی زیر انتخاب کنید:"
             )

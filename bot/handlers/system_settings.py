@@ -20,6 +20,8 @@ class SystemSettingStates(StatesGroup):
     """FSM states for system settings."""
     waiting_payment_gateway_domain = State()
     waiting_zarinpal_merchant_id = State()
+    waiting_chat_message_cost = State()
+    waiting_chat_success_message_count = State()
 
 
 @router.callback_query(F.data == "admin:system_settings")
@@ -34,12 +36,16 @@ async def admin_system_settings(callback: CallbackQuery):
         merchant_id = await get_system_setting_value(db_session, 'zarinpal_merchant_id', 'تنظیم نشده')
         sandbox = await get_system_setting_value(db_session, 'zarinpal_sandbox', 'true')
         sandbox_text = "فعال" if sandbox.lower() == 'true' else "غیرفعال"
+        chat_cost = await get_system_setting_value(db_session, 'chat_message_cost', '1')
+        success_message_count = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
         
         text = (
             "⚙️ تنظیمات سیستم\n\n"
             f"🌐 آدرس درگاه پرداخت: {gateway_domain}\n"
             f"🔑 Merchant ID زرین‌پال: {merchant_id}\n"
-            f"🧪 حالت Sandbox: {sandbox_text}\n\n"
+            f"🧪 حالت Sandbox: {sandbox_text}\n"
+            f"💰 هزینه هر پیام چت (غیر پریمیوم): {chat_cost} سکه\n"
+            f"📊 تعداد پیام برای کسر سکه: {success_message_count} پیام\n\n"
             "یکی از تنظیمات را برای ویرایش انتخاب کنید:"
         )
         
@@ -105,6 +111,98 @@ async def admin_setting_zarinpal_sandbox(callback: CallbackQuery):
         
         # Refresh settings menu
         await admin_system_settings(callback)
+        break
+
+
+@router.callback_query(F.data == "admin:setting:chat_message_cost")
+async def admin_setting_chat_message_cost(callback: CallbackQuery, state: FSMContext):
+    """Set chat message cost."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "💰 تنظیم هزینه هر پیام چت\n\n"
+        "لطفاً تعداد سکه‌ای که برای هر پیام چت از کاربران غیر پریمیوم کسر می‌شود را وارد کنید:\n\n"
+        "مثال: 1\n\n"
+        "یا /cancel برای لغو"
+    )
+    await state.set_state(SystemSettingStates.waiting_chat_message_cost)
+    await callback.answer()
+
+
+@router.message(StateFilter(SystemSettingStates.waiting_chat_message_cost), F.text & ~F.text.startswith("/"))
+async def process_setting_chat_message_cost(message: Message, state: FSMContext):
+    """Process chat message cost setting."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        cost = int(message.text.strip())
+        if cost < 0:
+            await message.answer("❌ هزینه نمی‌تواند منفی باشد.\n\nلطفاً دوباره وارد کنید:")
+            return
+    except ValueError:
+        await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.\n\nلطفاً دوباره وارد کنید:")
+        return
+    
+    async for db_session in get_db():
+        await set_system_setting(
+            db_session,
+            'chat_message_cost',
+            str(cost),
+            'int',
+            'Cost in coins for each chat message (non-premium users)'
+        )
+        
+        await message.answer(f"✅ هزینه هر پیام چت به {cost} سکه تغییر یافت.")
+        await state.clear()
+        break
+
+
+@router.callback_query(F.data == "admin:setting:chat_success_message_count")
+async def admin_setting_chat_success_message_count(callback: CallbackQuery, state: FSMContext):
+    """Set chat success message count."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "📊 تنظیم تعداد پیام برای کسر سکه\n\n"
+        "لطفاً تعداد پیامی که هر کاربر باید ارسال کند تا چت موفقیت‌آمیز محسوب شود را وارد کنید:\n\n"
+        "مثال: 2\n\n"
+        "یا /cancel برای لغو"
+    )
+    await state.set_state(SystemSettingStates.waiting_chat_success_message_count)
+    await callback.answer()
+
+
+@router.message(StateFilter(SystemSettingStates.waiting_chat_success_message_count), F.text & ~F.text.startswith("/"))
+async def process_setting_chat_success_message_count(message: Message, state: FSMContext):
+    """Process chat success message count setting."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        count = int(message.text.strip())
+        if count < 1:
+            await message.answer("❌ تعداد پیام نمی‌تواند کمتر از 1 باشد.\n\nلطفاً دوباره وارد کنید:")
+            return
+    except ValueError:
+        await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.\n\nلطفاً دوباره وارد کنید:")
+        return
+    
+    async for db_session in get_db():
+        await set_system_setting(
+            db_session,
+            'chat_success_message_count',
+            str(count),
+            'int',
+            'Number of messages each user must send for chat to be considered successful'
+        )
+        
+        await message.answer(f"✅ تعداد پیام برای کسر سکه به {count} پیام تغییر یافت.")
+        await state.clear()
         break
 
 

@@ -169,24 +169,85 @@ async def accept_chat_request(callback: CallbackQuery):
                 await callback.answer("❌ این کاربر در حال حاضر در یک چت فعال است.", show_alert=True)
                 return
             
-            # Create chat room
+            # Create chat room (chat request doesn't have preferred gender, so pass None)
             try:
-                chat_room = await chat_manager.create_chat(user.id, requester.id, db_session)
+                chat_room = await chat_manager.create_chat(user.id, requester.id, db_session, None, None)
                 
                 # Chat created successfully, now notify users
                 # If notification fails, it's not critical - chat is already created
                 bot = Bot(token=settings.BOT_TOKEN)
                 notification_errors = []
                 
+                # Check premium status and prepare messages
+                from db.crud import check_user_premium, get_user_points, spend_points
+                from core.points_manager import PointsManager
+                from db.crud import get_system_setting_value
+                
+                user_premium = await check_user_premium(db_session, user.id)
+                requester_premium = await check_user_premium(db_session, requester.id)
+                
+                # Get chat cost from system settings
+                chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
                 try:
-                    success_msg = "✅ چت شروع شد! اکنون می‌توانید با هم چت کنید."
-                    await bot.send_message(user.telegram_id, success_msg, reply_markup=get_chat_reply_keyboard())
+                    chat_cost = int(chat_cost_str)
+                except (ValueError, TypeError):
+                    chat_cost = 3
+                
+                # Get user points
+                user_points = await get_user_points(db_session, user.id)
+                requester_points = await get_user_points(db_session, requester.id)
+                
+                # Chat requests don't deduct coins (preferred_gender is None, meaning "all")
+                # So no coin deduction needed
+                
+                # Prepare messages with beautiful UI
+                user_msg = (
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "✅ چت شروع شد!\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "🎉 اکنون می‌توانید با هم چت کنید.\n\n"
+                )
+                
+                requester_msg = (
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "✅ چت شروع شد!\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "🎉 اکنون می‌توانید با هم چت کنید.\n\n"
+                )
+                
+                # Add cost information
+                if user_premium:
+                    user_msg += (
+                        "💎 وضعیت: پریمیوم\n"
+                        "💰 هزینه این چت: رایگان\n\n"
+                    )
+                else:
+                    user_msg += (
+                        "💰 هزینه این چت: رایگان\n"
+                        "🌐 چون از طریق درخواست چت شروع شد، هیچ سکه‌ای کسر نمی‌شه.\n\n"
+                    )
+                
+                if requester_premium:
+                    requester_msg += (
+                        "💎 وضعیت: پریمیوم\n"
+                        "💰 هزینه این چت: رایگان\n\n"
+                    )
+                else:
+                    requester_msg += (
+                        "💰 هزینه این چت: رایگان\n"
+                        "🌐 چون از طریق درخواست چت شروع شد، هیچ سکه‌ای کسر نمی‌شه.\n\n"
+                    )
+                
+                user_msg += "━━━━━━━━━━━━━━━━━━━━"
+                requester_msg += "━━━━━━━━━━━━━━━━━━━━"
+                
+                try:
+                    await bot.send_message(user.telegram_id, user_msg, reply_markup=get_chat_reply_keyboard())
                 except Exception as e:
                     notification_errors.append(f"Failed to notify user: {e}")
                 
                 try:
-                    success_msg = "✅ چت شروع شد! اکنون می‌توانید با هم چت کنید."
-                    await bot.send_message(requester.telegram_id, success_msg, reply_markup=get_chat_reply_keyboard())
+                    await bot.send_message(requester.telegram_id, requester_msg, reply_markup=get_chat_reply_keyboard())
                 except Exception as e:
                     notification_errors.append(f"Failed to notify requester: {e}")
                 

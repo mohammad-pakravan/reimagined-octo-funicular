@@ -97,28 +97,284 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             # Check if either user already has active chat
             if await chat_manager.is_chat_active(user1.id, db_session):
                 logger.info(f"User {user1_telegram_id} already has active chat, skipping match")
+                # Remove from queue if they have active chat
+                await matchmaking_queue.remove_user_from_queue(user1_telegram_id)
                 return
             if await chat_manager.is_chat_active(user2.id, db_session):
                 logger.info(f"User {user2_telegram_id} already has active chat, skipping match")
+                # Remove from queue if they have active chat
+                await matchmaking_queue.remove_user_from_queue(user2_telegram_id)
                 return
             
-            # Create chat room
-            chat_room = await chat_manager.create_chat(user1.id, user2.id, db_session)
+            # Get preferred genders from queue data
+            # IMPORTANT: Get user data BEFORE removing from queue (find_match removes users from queue)
+            # So we need to get data before find_match is called, or get it from a different source
+            # Actually, find_match already removed users from queue, so user_data might be None
+            # Let's try to get it anyway, but if it's None, we'll handle it
+            user1_data = await matchmaking_queue.get_user_data(user1_telegram_id)
+            user2_data = await matchmaking_queue.get_user_data(user2_telegram_id)
             
-            # Notify both users
+            # If user data is None (was removed from queue), try to get it from find_match's cache
+            # Actually, we can't do that. The problem is that find_match removes users from queue
+            # So we need to get user data BEFORE find_match removes it, or store it somewhere else
+            # For now, let's log and see what happens
+            if not user1_data:
+                logger.warning(f"User {user1_telegram_id} data not found in queue (might have been removed)")
+            if not user2_data:
+                logger.warning(f"User {user2_telegram_id} data not found in queue (might have been removed)")
+            
+            # Get preferred gender - simple logic:
+            # - If None or "all" → no coins deducted
+            # - If "male" or "female" → coins deducted
+            user1_pref_gender_raw = user1_data.get("preferred_gender") if user1_data else None
+            user2_pref_gender_raw = user2_data.get("preferred_gender") if user2_data else None
+            
+            # Log raw values before normalization
+            logger.info(f"DEBUG: User {user1_telegram_id} raw preferred_gender: {user1_pref_gender_raw}, type: {type(user1_pref_gender_raw)}")
+            logger.info(f"DEBUG: User {user2_telegram_id} raw preferred_gender: {user2_pref_gender_raw}, type: {type(user2_pref_gender_raw)}")
+            
+            # Normalize: convert "all" or None to None, keep "male" and "female" as is
+            # JSON stores None as null, so we need to handle both None and "all"
+            # IMPORTANT: If raw value is "male" or "female", keep it as is!
+            if user1_pref_gender_raw is None:
+                user1_pref_gender = None
+            elif user1_pref_gender_raw == "all":
+                user1_pref_gender = None
+            elif user1_pref_gender_raw in ["male", "female"]:
+                user1_pref_gender = user1_pref_gender_raw
+            else:
+                # Unknown value, treat as None
+                logger.warning(f"Unknown preferred_gender value for user {user1_telegram_id}: {user1_pref_gender_raw}")
+                user1_pref_gender = None
+            
+            if user2_pref_gender_raw is None:
+                user2_pref_gender = None
+            elif user2_pref_gender_raw == "all":
+                user2_pref_gender = None
+            elif user2_pref_gender_raw in ["male", "female"]:
+                user2_pref_gender = user2_pref_gender_raw
+            else:
+                # Unknown value, treat as None
+                logger.warning(f"Unknown preferred_gender value for user {user2_telegram_id}: {user2_pref_gender_raw}")
+                user2_pref_gender = None
+            
+            # Log for debugging
+            logger.info(f"User {user1_telegram_id} preferred_gender from queue: {user1_data.get('preferred_gender') if user1_data else None}, normalized: {user1_pref_gender}")
+            logger.info(f"User {user2_telegram_id} preferred_gender from queue: {user2_data.get('preferred_gender') if user2_data else None}, normalized: {user2_pref_gender}")
+            
+            # Check if chat room already exists (might have been created by try_find_match)
+            # This prevents duplicate messages
+            # Check if either user already has an active chat
+            user1_has_chat = await chat_manager.is_chat_active(user1.id, db_session)
+            user2_has_chat = await chat_manager.is_chat_active(user2.id, db_session)
+            
+            if user1_has_chat or user2_has_chat:
+                # Chat already exists, don't create again
+                logger.info(f"Chat already exists for users {user1_telegram_id} (has_chat: {user1_has_chat}) and {user2_telegram_id} (has_chat: {user2_has_chat}), skipping")
+                # Remove from queue anyway
+                await matchmaking_queue.remove_user_from_queue(user1_telegram_id)
+                await matchmaking_queue.remove_user_from_queue(user2_telegram_id)
+                return
+            
+            # Create chat room with preferred genders
+            chat_room = await chat_manager.create_chat(
+                user1.id, 
+                user2.id, 
+                db_session,
+                user1_preferred_gender=user1_pref_gender,
+                user2_preferred_gender=user2_pref_gender
+            )
+            
+            # Log after creating chat room
+            stored_user1_pref = await chat_manager.get_user_preferred_gender(chat_room.id, user1.id)
+            stored_user2_pref = await chat_manager.get_user_preferred_gender(chat_room.id, user2.id)
+            logger.info(f"After creating chat room {chat_room.id}: user1_pref_gender stored as: {stored_user1_pref}, user2_pref_gender stored as: {stored_user2_pref}")
+            
+            # Now remove user data from queue (after we've used it)
+            await matchmaking_queue.remove_user_from_queue(user1_telegram_id)
+            await matchmaking_queue.remove_user_from_queue(user2_telegram_id)
+            
+            # Notify both users and deduct coins if needed
             from bot.keyboards.reply import get_chat_reply_keyboard
+            from db.crud import check_user_premium, spend_points, get_user_points
+            from core.points_manager import PointsManager
+            from db.crud import get_system_setting_value
+            
+            # Check premium status
+            user1_premium = await check_user_premium(db_session, user1.id)
+            user2_premium = await check_user_premium(db_session, user2.id)
+            
+            # Get chat cost from system settings
+            chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
+            try:
+                chat_cost = int(chat_cost_str)
+            except (ValueError, TypeError):
+                chat_cost = 3
+            
+            # Get user points
+            user1_points = await get_user_points(db_session, user1.id)
+            user2_points = await get_user_points(db_session, user2.id)
+            
+            # Deduct coins for non-premium users
+            # Simple logic: if preferred_gender is "male" or "female", deduct coins
+            # If preferred_gender is None (meaning "all"), don't deduct coins
+            user1_coins_deducted = False
+            user2_coins_deducted = False
+            
+            # Check if user1 selected specific gender (not "all")
+            if not user1_premium and user1_pref_gender is not None and user1_pref_gender in ["male", "female"]:
+                # Check if user has enough coins
+                if user1_points >= chat_cost:
+                    success = await spend_points(
+                        db_session,
+                        user1.id,
+                        chat_cost,
+                        "spent",
+                        "chat_start",
+                        f"Cost for starting chat (will be refunded if chat unsuccessful)"
+                    )
+                    if success:
+                        user1_coins_deducted = True
+                        await chat_manager.set_chat_cost_deducted(chat_room.id, user1.id, True)
+                        user1_points -= chat_cost
+            
+            # Check if user2 selected specific gender (not "all")
+            if not user2_premium and user2_pref_gender is not None and user2_pref_gender in ["male", "female"]:
+                # Check if user has enough coins
+                if user2_points >= chat_cost:
+                    success = await spend_points(
+                        db_session,
+                        user2.id,
+                        chat_cost,
+                        "spent",
+                        "chat_start",
+                        f"Cost for starting chat (will be refunded if chat unsuccessful)"
+                    )
+                    if success:
+                        user2_coins_deducted = True
+                        await chat_manager.set_chat_cost_deducted(chat_room.id, user2.id, True)
+                        user2_points -= chat_cost
+            
+            # Prepare messages with beautiful UI
+            user1_msg = (
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ هم‌چت پیدا شد!\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🎉 شما الان به هم متصل شدید!\n"
+                "💬 می‌تونید شروع به چت کنید.\n\n"
+            )
+            
+            user2_msg = (
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ هم‌چت پیدا شد!\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🎉 شما الان به هم متصل شدید!\n"
+                "💬 می‌تونید شروع به چت کنید.\n\n"
+            )
+            
+            # Add cost information
+            # Log for debugging - IMPORTANT: log the actual values
+            logger.info(f"User {user1_telegram_id} - premium: {user1_premium}, pref_gender: {user1_pref_gender}, coins_deducted: {user1_coins_deducted}, points: {user1_points}")
+            logger.info(f"User {user1_telegram_id} - pref_gender_raw was: {user1_pref_gender_raw}, normalized to: {user1_pref_gender}")
+            
+            if user1_premium:
+                user1_msg += (
+                    "💎 وضعیت: پریمیوم\n"
+                    "💰 هزینه این چت: رایگان\n\n"
+                )
+            elif user1_pref_gender is None:
+                # "all" was selected - no coins deducted
+                user1_msg += (
+                    "💰 هزینه این چت: رایگان\n"
+                    "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نمی‌شه.\n\n"
+                )
+            elif user1_coins_deducted:
+                # Specific gender selected and coins were deducted
+                # Get required message count from system settings
+                required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
+                try:
+                    required_message_count = int(required_message_count_str)
+                except (ValueError, TypeError):
+                    required_message_count = 2
+                
+                user1_msg += (
+                    f"💰 هزینه این چت: {chat_cost} سکه\n"
+                    f"💎 سکه‌های باقی‌مانده: {user1_points}\n\n"
+                    f"💡 نکته: اگر چت موفقیت‌آمیز باشه (هر دو طرف حداقل {required_message_count} پیام بفرستن)، این سکه کسر می‌مونه.\n"
+                    f"در غیر این صورت، سکه‌ها بهت برمی‌گرده.\n\n"
+                    f"💎 با خرید پریمیوم:\n"
+                    f"• هزینه چت: رایگان\n"
+                    f"• نفر اول صف\n"
+                    f"• امکانات بیشتر\n\n"
+                )
+            else:
+                # Specific gender selected but coins weren't deducted (probably didn't have enough coins)
+                user1_msg += (
+                    f"⚠️ سکه کافی نداشتی!\n"
+                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                    f"💎 سکه فعلی تو: {user1_points}\n\n"
+                    f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی!\n\n"
+                    f"💎 با خرید پریمیوم:\n"
+                    f"• هزینه چت: رایگان\n"
+                    f"• نفر اول صف\n"
+                    f"• امکانات بیشتر\n\n"
+                )
+            
+            if user2_premium:
+                user2_msg += (
+                    "💎 وضعیت: پریمیوم\n"
+                    "💰 هزینه این چت: رایگان\n\n"
+                )
+            elif user2_pref_gender is None:
+                # "all" was selected - no coins deducted
+                user2_msg += (
+                    "💰 هزینه این چت: رایگان\n"
+                    "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نمی‌شه.\n\n"
+                )
+            elif user2_coins_deducted:
+                # Specific gender selected and coins were deducted
+                # Get required message count from system settings
+                required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
+                try:
+                    required_message_count = int(required_message_count_str)
+                except (ValueError, TypeError):
+                    required_message_count = 2
+                
+                user2_msg += (
+                    f"💰 هزینه این چت: {chat_cost} سکه\n"
+                    f"💎 سکه‌های باقی‌مانده: {user2_points}\n\n"
+                    f"💡 نکته: اگر چت موفقیت‌آمیز باشه (هر دو طرف حداقل {required_message_count} پیام بفرستن)، این سکه کسر می‌مونه.\n"
+                    f"در غیر این صورت، سکه‌ها بهت برمی‌گرده.\n\n"
+                    f"💎 با خرید پریمیوم:\n"
+                    f"• هزینه چت: رایگان\n"
+                    f"• نفر اول صف\n"
+                    f"• امکانات بیشتر\n\n"
+                )
+            else:
+                # Specific gender selected but coins weren't deducted (probably didn't have enough coins)
+                user2_msg += (
+                    f"⚠️ سکه کافی نداشتی!\n"
+                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                    f"💎 سکه فعلی تو: {user2_points}\n\n"
+                    f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی!\n\n"
+                    f"💎 با خرید پریمیوم:\n"
+                    f"• هزینه چت: رایگان\n"
+                    f"• نفر اول صف\n"
+                    f"• امکانات بیشتر\n\n"
+                )
+            
+            user1_msg += "━━━━━━━━━━━━━━━━━━━━"
+            user2_msg += "━━━━━━━━━━━━━━━━━━━━"
             
             await bot_instance.send_message(
                 user1.telegram_id,
-                "✅ هم‌چت پیدا شد! شما الان به هم متصل شدید.\n\n"
-                "شروع به چت کنید:",
+                user1_msg,
                 reply_markup=get_chat_reply_keyboard()
             )
             
             await bot_instance.send_message(
                 user2.telegram_id,
-                "✅ هم‌چت پیدا شد! شما الان به هم متصل شدید.\n\n"
-                "شروع به چت کنید:",
+                user2_msg,
                 reply_markup=get_chat_reply_keyboard()
             )
             

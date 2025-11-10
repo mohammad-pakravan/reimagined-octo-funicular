@@ -1,0 +1,64 @@
+version: '3.8'
+
+# Docker Compose override for testing
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml run --rm test
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telecaht_test
+    environment:
+      # Bot configuration (not needed for tests, but required)
+      BOT_TOKEN: ${BOT_TOKEN:-test_token}
+      # Database configuration
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-telecaht_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-telecaht_pass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-telecaht}
+      # Redis configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # MinIO configuration
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-profile-images}
+      MINIO_USE_SSL: "false"
+      # Channel configuration
+      MANDATORY_CHANNEL_ID: ${MANDATORY_CHANNEL_ID:-test_channel}
+      # Admin configuration
+      ADMIN_IDS: ${ADMIN_IDS:-123456789}
+      # FastAPI configuration
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      VIDEO_CALL_DOMAIN: ${VIDEO_CALL_DOMAIN:-http://localhost:3000}
+      VIDEO_CALL_API_URL: ${VIDEO_CALL_API_URL:-http://bot:8000}
+      VIDEO_CALL_WS_URL: ${VIDEO_CALL_WS_URL:-ws://bot:8000}
+      API_SECRET_KEY: ${API_SECRET_KEY:-test-secret-key}
+      DOCKER_ENV: "1"
+      # Premium configuration
+      PREMIUM_PRICE: ${PREMIUM_PRICE:-10000.0}
+      PREMIUM_DURATION_DAYS: ${PREMIUM_DURATION_DAYS:-30}
+      # Chat configuration
+      MAX_CHAT_DURATION_MINUTES: ${MAX_CHAT_DURATION_MINUTES:-60}
+      PREMIUM_CHAT_DURATION_MINUTES: ${PREMIUM_CHAT_DURATION_MINUTES:-180}
+      MATCHMAKING_TIMEOUT_SECONDS: ${MATCHMAKING_TIMEOUT_SECONDS:-300}
+      # Rate limiting
+      RATE_LIMIT_MESSAGES_PER_MINUTE: ${RATE_LIMIT_MESSAGES_PER_MINUTE:-20}
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+      - mysql
+    networks:
+      - telecaht_network
+    command: pytest
+    profiles:
+      - test
+
+

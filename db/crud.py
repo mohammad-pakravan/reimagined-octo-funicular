@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, and_, or_, func
+from sqlalchemy.orm import joinedload
 
 from db.models import (
     User, ChatRoom, PremiumSubscription, Report, Like, Follow, Block, DirectMessage, ChatEndNotification,
@@ -158,9 +159,21 @@ async def get_active_chat_room_by_user(session: AsyncSession, user_id: int) -> O
                 ChatRoom.is_active == True,
                 or_(ChatRoom.user1_id == user_id, ChatRoom.user2_id == user_id)
             )
-        )
+        ).order_by(ChatRoom.created_at.desc())
     )
-    return result.scalar_one_or_none()
+    # If multiple active chats exist, return the most recent one
+    # This can happen if there's a race condition or bug
+    chat_rooms = result.scalars().all()
+    if len(chat_rooms) > 1:
+        # Log warning and deactivate older chats
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"User {user_id} has {len(chat_rooms)} active chats. Deactivating older ones.")
+        # Keep the first (most recent), deactivate others
+        for chat_room in chat_rooms[1:]:
+            await end_chat_room(session, chat_room.id)
+        await session.commit()
+    return chat_rooms[0] if chat_rooms else None
 
 
 async def get_chat_room_by_id(session: AsyncSession, chat_room_id: int) -> Optional[ChatRoom]:
@@ -919,6 +932,20 @@ async def get_referral_code_by_code(session: AsyncSession, code: str) -> Optiona
     return result.scalar_one_or_none()
 
 
+async def get_referral_by_users(
+    session: AsyncSession,
+    referrer_id: int,
+    referred_id: int
+) -> Optional[Referral]:
+    """Get referral relationship between two users."""
+    result = await session.execute(
+        select(Referral)
+        .where(Referral.referrer_id == referrer_id)
+        .where(Referral.referred_id == referred_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_referral(
     session: AsyncSession,
     referrer_id: int,
@@ -965,6 +992,100 @@ async def get_referral_count(session: AsyncSession, user_id: int) -> int:
         .where(Referral.referrer_id == user_id)
     )
     return result.scalar() or 0
+
+
+# ============= User Activity Count Functions =============
+
+async def get_user_chat_count(session: AsyncSession, user_id: int) -> int:
+    """Get count of successful chats for a user (ended chats only)."""
+    result = await session.execute(
+        select(func.count(ChatRoom.id))
+        .where(
+            and_(
+                ChatRoom.is_active == False,
+                ChatRoom.ended_at.isnot(None),
+                or_(
+                    ChatRoom.user1_id == user_id,
+                    ChatRoom.user2_id == user_id
+                )
+            )
+        )
+    )
+    return result.scalar() or 0
+
+
+async def get_user_message_count(session: AsyncSession, user_id: int) -> int:
+    """
+    Get total count of messages sent by user in chats.
+    Note: This is an approximation based on chat rooms.
+    For exact count, we would need to track messages in a separate table.
+    For now, we'll use a placeholder that returns 0 and can be improved later.
+    """
+    # TODO: Implement proper message counting if needed
+    # For now, return 0 as we don't have a messages table
+    return 0
+
+
+async def get_user_follow_given_count(session: AsyncSession, user_id: int) -> int:
+    """Get count of follows given by user."""
+    result = await session.execute(
+        select(func.count(Follow.id))
+        .where(Follow.follower_id == user_id)
+    )
+    return result.scalar() or 0
+
+
+async def get_user_follow_received_count(session: AsyncSession, user_id: int) -> int:
+    """Get count of follows received by user."""
+    result = await session.execute(
+        select(func.count(Follow.id))
+        .where(Follow.followed_id == user_id)
+    )
+    return result.scalar() or 0
+
+
+async def get_user_dm_sent_count(session: AsyncSession, user_id: int) -> int:
+    """Get count of direct messages sent by user."""
+    result = await session.execute(
+        select(func.count(DirectMessage.id))
+        .where(DirectMessage.sender_id == user_id)
+    )
+    return result.scalar() or 0
+
+
+async def get_user_premium_days(session: AsyncSession, user_id: int) -> int:
+    """Get total premium days user has had (approximate)."""
+    from datetime import datetime, timedelta
+    
+    user = await get_user_by_id(session, user_id)
+    if not user or not user.is_premium or not user.premium_expires_at:
+        return 0
+    
+    # Get all premium subscriptions
+    result = await session.execute(
+        select(PremiumSubscription)
+        .where(PremiumSubscription.user_id == user_id)
+        .order_by(PremiumSubscription.created_at)
+    )
+    subscriptions = result.scalars().all()
+    
+    total_days = 0
+    for sub in subscriptions:
+        if sub.end_date and sub.start_date:
+            days = (sub.end_date - sub.start_date).days
+            total_days += days
+        elif sub.end_date:
+            # If only end_date exists, estimate from created_at
+            days = (sub.end_date - sub.created_at).days
+            total_days += days
+    
+    # Also check current premium status
+    if user.premium_expires_at and user.premium_expires_at > datetime.utcnow():
+        # Add remaining days
+        remaining = (user.premium_expires_at - datetime.utcnow()).days
+        total_days += remaining
+    
+    return total_days
 
 
 # ============= Badges CRUD =============
@@ -1042,9 +1163,13 @@ async def get_achievement_by_key(session: AsyncSession, achievement_key: str) ->
 
 
 async def get_all_achievements(session: AsyncSession) -> List[Achievement]:
-    """Get all achievements."""
-    result = await session.execute(select(Achievement))
-    return list(result.scalars().all())
+    """Get all achievements with badge relationship loaded."""
+    result = await session.execute(
+        select(Achievement)
+        .options(joinedload(Achievement.badge))
+    )
+    # Use unique() to avoid duplicate results from joinedload
+    return list(result.unique().scalars().all())
 
 
 async def get_or_create_user_achievement(
@@ -1110,6 +1235,8 @@ async def update_user_achievement_progress(
             )
         
         # Award badge if achievement has badge
+        # Note: Badge notification will be sent by the calling code if needed
+        # We don't send notification here to avoid duplicate notifications
         if achievement.badge_id:
             await award_badge_to_user(session, user_id, achievement.badge_id)
     

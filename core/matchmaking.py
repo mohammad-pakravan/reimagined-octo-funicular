@@ -90,11 +90,29 @@ class MatchmakingQueue:
         }
         
         user_data_key = self._get_user_data_key(user_id)
+        
+        # Log for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"DEBUG: add_user_to_queue for user {user_id}: preferred_gender = {preferred_gender}, type = {type(preferred_gender)}")
+        logger.info(f"DEBUG: user_data before json.dumps: preferred_gender = {user_data.get('preferred_gender')}, type = {type(user_data.get('preferred_gender'))}")
+        
+        json_str = json.dumps(user_data)
+        logger.info(f"DEBUG: json.dumps result: {json_str}")
+        
         await self.redis.setex(
             user_data_key,
             settings.MATCHMAKING_TIMEOUT_SECONDS,
-            json.dumps(user_data)
+            json_str
         )
+        
+        # Verify what was stored
+        stored_data = await self.redis.get(user_data_key)
+        if stored_data:
+            if isinstance(stored_data, bytes):
+                stored_data = stored_data.decode('utf-8')
+            stored_user_data = json.loads(stored_data)
+            logger.info(f"DEBUG: Verified stored data for user {user_id}: preferred_gender = {stored_user_data.get('preferred_gender')}, type = {type(stored_user_data.get('preferred_gender'))}")
         
         # Add to appropriate queues based on what the user is looking for
         queues_to_join = []
@@ -152,7 +170,18 @@ class MatchmakingQueue:
         if not data:
             return None
         
-        return json.loads(data)
+        # Decode bytes to string if needed
+        if isinstance(data, bytes):
+            data = data.decode('utf-8')
+        
+        user_data = json.loads(data)
+        
+        # Log for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"DEBUG: get_user_data for user {user_id}: preferred_gender = {user_data.get('preferred_gender')}, type = {type(user_data.get('preferred_gender'))}")
+        
+        return user_data
     
     async def find_match(self, user_id: int) -> Optional[int]:
         """
@@ -250,8 +279,18 @@ class MatchmakingQueue:
                     continue
             
             # Match found!
-            await self.remove_user_from_queue(user_id)
-            await self.remove_user_from_queue(candidate_id)
+            # IMPORTANT: Don't remove user data yet - we need it in connect_users
+            # Just remove from queues, but keep user data for now
+            # We'll remove user data after connect_users is done
+            
+            # Remove from queues (but keep user data)
+            pattern = f"{self.queue_prefix}:*"
+            async for queue_key in self.redis.scan_iter(match=pattern):
+                await self.redis.srem(queue_key, user_id)
+                await self.redis.srem(queue_key, candidate_id)
+            
+            # Note: We don't delete user_data_key here - it will be deleted after connect_users
+            # This way, connect_users can still access the user data
             
             return candidate_id
         

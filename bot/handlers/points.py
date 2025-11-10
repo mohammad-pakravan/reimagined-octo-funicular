@@ -213,6 +213,39 @@ async def points_convert(callback: CallbackQuery):
             )
             
             if subscription:
+                # Check and award badges for premium achievements
+                from core.achievement_system import AchievementSystem
+                from core.badge_manager import BadgeManager
+                from db.crud import get_user_premium_days, get_badge_by_key
+                from aiogram import Bot as BadgeBot
+                
+                # Get premium days
+                premium_days = await get_user_premium_days(db_session, user.id)
+                
+                # Check premium achievements
+                completed_achievements = await AchievementSystem.check_premium_achievement(
+                    user.id,
+                    premium_days
+                )
+                
+                # Award badges
+                badge_bot = BadgeBot(token=settings.BOT_TOKEN)
+                try:
+                    for achievement in completed_achievements:
+                        if achievement.achievement and achievement.achievement.badge_id:
+                            badge = await get_badge_by_key(db_session, achievement.achievement.achievement_key)
+                            if badge:
+                                await BadgeManager.award_badge_and_notify(
+                                    user.id,
+                                    badge.badge_key,
+                                    badge_bot,
+                                    user.telegram_id
+                                )
+                except Exception:
+                    pass
+                finally:
+                    await badge_bot.session.close()
+                
                 await callback.answer(
                     f"✅ {days} روز پریمیوم دریافت کردی!",
                     show_alert=True

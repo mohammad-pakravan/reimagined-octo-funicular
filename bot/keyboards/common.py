@@ -12,9 +12,6 @@ def get_gender_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="👨 آقا", callback_data="gender:male"),
             InlineKeyboardButton(text="👩 خانم", callback_data="gender:female"),
         ],
-        [
-            InlineKeyboardButton(text="⚪ سایر", callback_data="gender:other"),
-        ],
     ])
     return keyboard
 
@@ -27,7 +24,6 @@ def get_preferred_gender_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="👩 خانم", callback_data="pref_gender:female"),
         ],
         [
-            InlineKeyboardButton(text="⚪ سایر", callback_data="pref_gender:other"),
             InlineKeyboardButton(text="🌐 همه", callback_data="pref_gender:all"),
         ],
     ])
@@ -42,7 +38,6 @@ def get_chat_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="❌ End Chat", callback_data="chat:end"),
-            InlineKeyboardButton(text="📞 Video Call", callback_data="chat:video_call"),
         ],
         [
             InlineKeyboardButton(text="📊 Profile", callback_data="profile:view"),

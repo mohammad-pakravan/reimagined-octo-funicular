@@ -217,6 +217,12 @@ def get_admin_system_settings_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🧪 حالت Sandbox", callback_data="admin:setting:zarinpal_sandbox"),
         ],
         [
+            InlineKeyboardButton(text="💰 هزینه پیام چت", callback_data="admin:setting:chat_message_cost"),
+        ],
+        [
+            InlineKeyboardButton(text="📊 تعداد پیام برای کسر سکه", callback_data="admin:setting:chat_success_message_count"),
+        ],
+        [
             InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:main"),
         ],
     ])

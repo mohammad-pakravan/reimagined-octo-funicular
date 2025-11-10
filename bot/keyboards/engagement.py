@@ -13,7 +13,7 @@ def get_engagement_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="⭐ سکه‌ها", callback_data="points:info"),
-            InlineKeyboardButton(text="🏆 دستاوردها", callback_data="achievements:list"),
+            InlineKeyboardButton(text="🏅 مدال‌ها", callback_data="achievements:list"),
         ],
         [
             InlineKeyboardButton(text="👥 دعوت دوستان", callback_data="referral:info"),
@@ -106,11 +106,10 @@ def get_achievements_menu_keyboard() -> InlineKeyboardMarkup:
     """Get achievements menu keyboard."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ دستاوردهای کامل شده", callback_data="achievements:completed"),
-            InlineKeyboardButton(text="📋 همه دستاوردها", callback_data="achievements:all"),
+            InlineKeyboardButton(text="🏅 مدال‌های من", callback_data="achievements:completed"),
         ],
         [
-            InlineKeyboardButton(text="🎖️ بج‌ها", callback_data="achievements:badges"),
+            InlineKeyboardButton(text="🏅 همه مدال‌ها", callback_data="achievements:badges"),
         ],
         [
             InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:menu"),
@@ -142,12 +141,6 @@ def get_achievements_pagination_keyboard(page: int, total_pages: int, callback_p
 def get_referral_menu_keyboard() -> InlineKeyboardMarkup:
     """Get referral menu keyboard."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📋 کد دعوت من", callback_data="referral:code"),
-        ],
-        [
-            InlineKeyboardButton(text="➕ استفاده از کد", callback_data="referral:use"),
-        ],
         [
             InlineKeyboardButton(text="📊 آمار دعوت‌ها", callback_data="referral:stats"),
         ],
