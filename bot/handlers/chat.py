@@ -1269,11 +1269,11 @@ async def cancel_search(callback: CallbackQuery, state: FSMContext):
             )
         except:
             # If edit fails, send new message
-        await callback.message.answer(
-            "✅ جستجو لغو شد.\n\n"
-            "شما از صف خارج شدید.",
-            reply_markup=get_main_reply_keyboard()
-        )
+            await callback.message.answer(
+                "✅ جستجو لغو شد.\n\n"
+                "شما از صف خارج شدید.",
+                reply_markup=get_main_reply_keyboard()
+            )
         
         await callback.answer("✅ جستجو لغو شد")
         await state.clear()

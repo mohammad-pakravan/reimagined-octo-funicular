@@ -51,6 +51,12 @@ from db.crud import (
     get_system_setting_value,
     set_system_setting,
     delete_coin_reward_setting,
+    create_mandatory_channel,
+    get_all_mandatory_channels,
+    get_mandatory_channel_by_id,
+    update_mandatory_channel,
+    delete_mandatory_channel,
+    get_active_mandatory_channels,
 )
 from bot.keyboards.common import get_admin_keyboard, get_main_menu_keyboard
 from bot.keyboards.admin import (
@@ -62,6 +68,9 @@ from bot.keyboards.admin import (
     get_coin_reward_list_keyboard,
     get_referral_link_list_keyboard,
     get_referral_link_detail_keyboard,
+    get_mandatory_channels_keyboard,
+    get_mandatory_channel_list_keyboard,
+    get_mandatory_channel_detail_keyboard,
 )
 from bot.keyboards.leaderboard import (
     get_admin_leaderboard_main_keyboard,
@@ -127,6 +136,14 @@ class PremiumPlanStates(StatesGroup):
     waiting_discount_start = State()
     waiting_discount_end = State()
     waiting_display_order = State()
+
+
+class MandatoryChannelStates(StatesGroup):
+    """FSM states for mandatory channel management."""
+    waiting_channel_id = State()
+    waiting_channel_name = State()
+    waiting_channel_link = State()
+    waiting_order_index = State()
 
 
 def is_admin(user_id: int) -> bool:

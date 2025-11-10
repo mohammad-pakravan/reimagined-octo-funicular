@@ -3,13 +3,15 @@ Start handler for the bot.
 Handles /start command and initial user setup.
 """
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
+from aiogram.exceptions import TelegramBadRequest
 
 from db.database import get_db
-from db.crud import get_user_by_telegram_id, get_payment_transaction_by_transaction_id, check_user_premium, get_premium_plan_by_id
-from bot.keyboards.common import get_main_menu_keyboard, get_gender_keyboard
-from bot.keyboards.reply import remove_keyboard
+from db.crud import get_user_by_telegram_id, get_payment_transaction_by_transaction_id, check_user_premium, get_premium_plan_by_id, get_active_mandatory_channels
+from bot.keyboards.common import get_main_menu_keyboard, get_gender_keyboard, get_channel_check_keyboard
+from bot.keyboards.reply import remove_keyboard, get_main_reply_keyboard
+from bot.keyboards.admin import get_admin_reply_keyboard
 from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
 from config.settings import settings
 
@@ -219,4 +221,130 @@ async def cmd_start(message: Message):
                     reply_markup=get_main_reply_keyboard()
                 )
         break
+
+
+@router.callback_query(F.data == "channel:check_membership")
+async def callback_check_channel_membership(callback: CallbackQuery):
+    """Check if user has joined all mandatory channels."""
+    user_id = callback.from_user.id
+    bot = callback.bot
+    
+    try:
+        # Get active mandatory channels
+        async for db_session in get_db():
+            mandatory_channels = await get_active_mandatory_channels(db_session)
+            break
+        else:
+            # Fallback to old MANDATORY_CHANNEL_ID if no channels in database
+            if settings.MANDATORY_CHANNEL_ID:
+                mandatory_channels = [type('obj', (object,), {
+                    'channel_id': settings.MANDATORY_CHANNEL_ID,
+                    'channel_link': f"https://t.me/{settings.MANDATORY_CHANNEL_ID.lstrip('@')}",
+                    'channel_name': None
+                })()]
+            else:
+                mandatory_channels = []
+        
+        if not mandatory_channels:
+            # No mandatory channels, allow access
+            await callback.answer("✅ عضویت تایید شد!", show_alert=True)
+            await callback.message.delete()
+            return
+        
+        # Check if user is member of all mandatory channels
+        missing_channels = []
+        all_joined = True
+        
+        for channel in mandatory_channels:
+            try:
+                member = await bot.get_chat_member(
+                    channel.channel_id,
+                    user_id
+                )
+                
+                # Check membership status
+                if member.status not in ["member", "administrator", "creator"]:
+                    # User hasn't joined this channel
+                    channel_link = channel.channel_link or f"https://t.me/{channel.channel_id.lstrip('@')}"
+                    channel_name = channel.channel_name or channel.channel_id
+                    missing_channels.append({
+                        'name': channel_name,
+                        'link': channel_link
+                    })
+                    all_joined = False
+            except TelegramBadRequest:
+                # Channel doesn't exist or bot can't access it, skip it
+                pass
+            except Exception:
+                # Error checking membership, skip this channel
+                pass
+        
+        if all_joined:
+            # User has joined all channels
+            await callback.answer("✅ عالی! شما به همه چنل‌ها عضو هستید.", show_alert=True)
+            
+            # Delete the channel check message
+            try:
+                await callback.message.delete()
+            except:
+                pass
+            
+            # Show welcome message
+            async for db_session in get_db():
+                user = await get_user_by_telegram_id(db_session, user_id)
+                if user:
+                    if user.is_banned:
+                        await callback.message.answer("❌ حساب کاربری شما مسدود شده است.")
+                        return
+                    
+                    username = callback.from_user.username or 'کاربر'
+                    
+                    # Check if user is admin
+                    if user_id in settings.ADMIN_IDS:
+                        await callback.message.answer(
+                            f"👋 خوش آمدید، {username}!\n\n"
+                            f"پنل مدیریت ربات:",
+                            reply_markup=get_admin_reply_keyboard()
+                        )
+                    else:
+                        await callback.message.answer(
+                            f"👋 خوش آمدید، {username}!\n\n"
+                            f"یک گزینه انتخاب کن:",
+                            reply_markup=get_main_reply_keyboard()
+                        )
+                break
+        else:
+            # User hasn't joined all channels yet
+            channels_list = []
+            channel_buttons = []
+            
+            for idx, channel in enumerate(missing_channels, start=1):
+                channel_name = channel.get('name', 'چنل')
+                channel_link = channel.get('link', '')
+                channels_list.append(f"{idx}. {channel_name}")
+                channel_buttons.append({
+                    'name': channel_name,
+                    'link': channel_link
+                })
+            
+            channels_text = "\n".join(channels_list)
+            
+            message_text = (
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "⚠️ عضویت اجباری در چنل‌ها\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "📺 برای استفاده از ربات، باید به چنل‌های زیر عضو شوید:\n\n"
+                f"{channels_text}\n\n"
+                "💡 روی دکمه‌های بالا کلیک کنید تا به چنل‌ها بروید.\n"
+                "بعد از عضویت، روی دکمه «✅ بررسی عضویت» کلیک کنید."
+            )
+            
+            await callback.answer("⚠️ هنوز به همه چنل‌ها عضو نشده‌اید.", show_alert=True)
+            await callback.message.edit_text(
+                message_text,
+                reply_markup=get_channel_check_keyboard(channel_buttons),
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        await callback.answer("❌ خطا در بررسی عضویت. لطفاً دوباره تلاش کنید.", show_alert=True)
 

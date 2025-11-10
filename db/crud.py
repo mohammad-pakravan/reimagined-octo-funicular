@@ -14,7 +14,7 @@ from db.models import (
     Achievement, UserAchievement, WeeklyChallenge, UserChallenge,
     AdminReferralLink, AdminReferralLinkClick, AdminReferralLinkSignup, CoinSetting,
     BroadcastMessage, BroadcastMessageReceipt,
-    Event, EventParticipant, EventReward, PremiumPlan, CoinRewardSetting
+    Event, EventParticipant, EventReward, PremiumPlan, CoinRewardSetting, MandatoryChannel
 )
 from config.settings import settings
 
@@ -2921,5 +2921,101 @@ async def set_system_setting(
     await session.commit()
     await session.refresh(setting)
     return setting
+
+
+# ============= Mandatory Channel CRUD =============
+
+async def create_mandatory_channel(
+    session: AsyncSession,
+    channel_id: str,
+    channel_name: Optional[str] = None,
+    channel_link: Optional[str] = None,
+    is_active: bool = True,
+    order_index: int = 0,
+    created_by_admin_id: Optional[int] = None
+) -> MandatoryChannel:
+    """Create a new mandatory channel."""
+    channel = MandatoryChannel(
+        channel_id=channel_id,
+        channel_name=channel_name,
+        channel_link=channel_link,
+        is_active=is_active,
+        order_index=order_index,
+        created_by_admin_id=created_by_admin_id
+    )
+    session.add(channel)
+    await session.commit()
+    await session.refresh(channel)
+    return channel
+
+
+async def get_mandatory_channel_by_id(session: AsyncSession, channel_id: int) -> Optional[MandatoryChannel]:
+    """Get mandatory channel by ID."""
+    result = await session.execute(select(MandatoryChannel).where(MandatoryChannel.id == channel_id))
+    return result.scalar_one_or_none()
+
+
+async def get_mandatory_channel_by_channel_id(session: AsyncSession, channel_id: str) -> Optional[MandatoryChannel]:
+    """Get mandatory channel by channel ID (username or numeric ID)."""
+    result = await session.execute(select(MandatoryChannel).where(MandatoryChannel.channel_id == channel_id))
+    return result.scalar_one_or_none()
+
+
+async def get_all_mandatory_channels(session: AsyncSession, active_only: bool = False) -> List[MandatoryChannel]:
+    """Get all mandatory channels, optionally filtered by active status."""
+    query = select(MandatoryChannel)
+    if active_only:
+        query = query.where(MandatoryChannel.is_active == True)
+    query = query.order_by(MandatoryChannel.order_index.asc(), MandatoryChannel.id.asc())
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def update_mandatory_channel(
+    session: AsyncSession,
+    channel_id: int,
+    channel_name: Optional[str] = None,
+    channel_link: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    order_index: Optional[int] = None
+) -> Optional[MandatoryChannel]:
+    """Update a mandatory channel."""
+    channel = await get_mandatory_channel_by_id(session, channel_id)
+    if not channel:
+        return None
+    
+    if channel_name is not None:
+        channel.channel_name = channel_name
+    if channel_link is not None:
+        channel.channel_link = channel_link
+    if is_active is not None:
+        channel.is_active = is_active
+    if order_index is not None:
+        channel.order_index = order_index
+    
+    await session.commit()
+    await session.refresh(channel)
+    return channel
+
+
+async def delete_mandatory_channel(session: AsyncSession, channel_id: int) -> bool:
+    """Delete a mandatory channel."""
+    channel = await get_mandatory_channel_by_id(session, channel_id)
+    if not channel:
+        return False
+    
+    await session.delete(channel)
+    await session.commit()
+    return True
+
+
+async def get_active_mandatory_channels(session: AsyncSession) -> List[MandatoryChannel]:
+    """Get all active mandatory channels ordered by order_index."""
+    result = await session.execute(
+        select(MandatoryChannel)
+        .where(MandatoryChannel.is_active == True)
+        .order_by(MandatoryChannel.order_index.asc(), MandatoryChannel.id.asc())
+    )
+    return list(result.scalars().all())
 
 

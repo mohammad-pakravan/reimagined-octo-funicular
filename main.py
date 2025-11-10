@@ -7,7 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 import redis.asyncio as redis
@@ -58,21 +58,26 @@ rate_limiter = None
 
 
 async def setup_redis():
-    """Setup Redis connection."""
+    """Setup Redis connection with connection pooling."""
     global redis_client
     
     try:
+        # Create Redis connection pool for better performance
         redis_client = redis.Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
             decode_responses=False,
+            max_connections=settings.REDIS_MAX_CONNECTIONS,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=True,
         )
         
         # Test connection
         await redis_client.ping()
-        logger.info("✅ Redis connected successfully")
+        logger.info("✅ Redis connected successfully with connection pooling")
         
         return redis_client
     except Exception as e:
@@ -127,11 +132,15 @@ async def setup_bot():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     
-    # Initialize dispatcher with memory storage
-    dp = Dispatcher(storage=MemoryStorage())
-    
-    # Setup Redis, matchmaking, chat manager, rate limiter, and activity tracker
+    # Setup Redis first (needed for RedisStorage)
     await setup_redis()
+    
+    # Initialize dispatcher with Redis storage for horizontal scaling
+    # RedisStorage accepts redis client directly in aiogram 3.x
+    storage = RedisStorage(redis=redis_client)
+    dp = Dispatcher(storage=storage)
+    
+    # Setup matchmaking, chat manager, rate limiter, and activity tracker
     await setup_matchmaking()
     await setup_chat_manager()
     await setup_rate_limiter()
@@ -171,6 +180,8 @@ async def setup_bot():
     dp.include_router(premium.router)
     import bot.handlers.admin as admin_handler
     dp.include_router(admin_handler.router)  # Admin handlers
+    import bot.handlers.mandatory_channels as mandatory_channels
+    dp.include_router(mandatory_channels.router)  # Mandatory channels handlers
     dp.include_router(profile.router)  # Profile interaction handlers
     dp.include_router(my_profile.router)  # My profile edit and management
     dp.include_router(direct_message.router)  # Direct message handlers

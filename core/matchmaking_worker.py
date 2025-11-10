@@ -38,7 +38,7 @@ def set_bot(bot: Bot):
 
 
 async def check_and_match_users():
-    """Check queue and match users periodically."""
+    """Check queue and match users periodically. Process multiple matches per cycle."""
     if not matchmaking_queue or not chat_manager or not bot_instance:
         return
     
@@ -50,7 +50,10 @@ async def check_and_match_users():
     # Get pattern to find all users in queue
     pattern = f"matchmaking:user:*"
     processed_users = set()
+    matches_found = []
+    batch_size = settings.MATCHMAKING_WORKER_BATCH_SIZE
     
+    # Collect potential matches
     async for key in matchmaking_queue.redis.scan_iter(match=pattern):
         user_id_str = key.decode().split(":")[-1] if isinstance(key, bytes) else key.split(":")[-1]
         try:
@@ -70,13 +73,20 @@ async def check_and_match_users():
         match_id = await matchmaking_queue.find_match(user_id)
         
         if match_id:
-            # Match found! Connect users
+            # Match found! Add to list for batch processing
             processed_users.add(user_id)
             processed_users.add(match_id)
-            await connect_users(user_id, match_id)
-            # Break to avoid processing more users in this cycle
-            # (Let next cycle handle remaining users)
-            break
+            matches_found.append((user_id, match_id))
+            
+            # Stop if we've reached batch size
+            if len(matches_found) >= batch_size:
+                break
+    
+    # Process all matches found in this cycle concurrently
+    if matches_found:
+        tasks = [connect_users(user1_id, user2_id) for user1_id, user2_id in matches_found]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info(f"Processed {len(matches_found)} matches in this cycle")
 
 
 async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
@@ -388,12 +398,15 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
 
 async def run_matchmaking_worker():
     """Run matchmaking worker in background."""
+    interval = settings.MATCHMAKING_WORKER_INTERVAL
+    logger.info(f"Matchmaking worker started with interval: {interval} seconds, batch size: {settings.MATCHMAKING_WORKER_BATCH_SIZE}")
+    
     while True:
         try:
             await check_and_match_users()
         except Exception as e:
-            print(f"Matchmaking worker error: {e}")
+            logger.error(f"Matchmaking worker error: {e}", exc_info=True)
         
-        # Check every 3 seconds
-        await asyncio.sleep(3)
+        # Check at configured interval (default: 1 second)
+        await asyncio.sleep(interval)
 

@@ -194,7 +194,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
         await db_session.refresh(user)
         
         # Check if user came from user referral link
-            referral_code = user_data.get("referral_code")
+        referral_code = user_data.get("referral_code")
         referral_code_obj = None
         if referral_code:
             from db.crud import get_referral_code_by_code, create_referral, get_coins_for_activity
@@ -203,15 +203,15 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
         if is_new_user and referral_code_obj:
             # New user with referral code - create referral relationship
             # Points will be awarded when profile is completed
-                if referral_code_obj.user_id != user.id:
-                    # Create referral
+            if referral_code_obj.user_id != user.id:
+                # Create referral
                 await create_referral(
-                        db_session,
-                        referral_code_obj.user_id,
-                        user.id,
-                        referral_code
-                    )
-                    
+                    db_session,
+                    referral_code_obj.user_id,
+                    user.id,
+                    referral_code
+                )
+                
                 await message.answer(
                     f"✅ عضویت شما از طریق لینک دعوت ثبت شد!\n\n"
                     f"💡 با تکمیل پروفایل خود (اسم، سن، شهر، تصویر)، سکه دریافت می‌کنی!"
@@ -264,18 +264,18 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                     from core.achievement_system import AchievementSystem
                     
                     await PointsManager.award_referral_profile_complete(
-                            referral_code_obj.user_id,
-                            user.id
-                        )
-                        
-                        # Check achievements
+                        referral_code_obj.user_id,
+                        user.id
+                    )
+                    
+                    # Check achievements
                     from db.crud import get_referral_count, get_user_by_id
-                        referral_count = await get_referral_count(db_session, referral_code_obj.user_id)
-                        await AchievementSystem.check_referral_achievement(
-                            referral_code_obj.user_id,
-                            referral_count
-                        )
-                        
+                    referral_count = await get_referral_count(db_session, referral_code_obj.user_id)
+                    await AchievementSystem.check_referral_achievement(
+                        referral_code_obj.user_id,
+                        referral_count
+                    )
+                    
                     # Notify referrer
                     referrer = await get_user_by_id(db_session, referral_code_obj.user_id)
                     if referrer:

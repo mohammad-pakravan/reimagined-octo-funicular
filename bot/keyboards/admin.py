@@ -16,8 +16,9 @@ def get_admin_reply_keyboard() -> ReplyKeyboardMarkup:
     keyboard.add(KeyboardButton(text="💰 تنظیمات سکه"))
     keyboard.add(KeyboardButton(text="📢 ارسال پیام همگانی"))
     keyboard.add(KeyboardButton(text="🎯 مدیریت ایونت‌ها"))
+    keyboard.add(KeyboardButton(text="📺 مدیریت چنل‌های اجباری"))
     
-    keyboard.adjust(2, 2, 2, 1)
+    keyboard.adjust(2, 2, 2, 1, 1)
     return keyboard.as_markup(resize_keyboard=True, persistent=True)
 
 
@@ -42,6 +43,9 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="💎 مدیریت پلن‌های پریمیوم", callback_data="admin:premium_plans"),
+        ],
+        [
+            InlineKeyboardButton(text="📺 چنل‌های اجباری", callback_data="admin:mandatory_channels"),
         ],
         [
             InlineKeyboardButton(text="⚙️ تنظیمات سیستم", callback_data="admin:system_settings"),
@@ -228,3 +232,72 @@ def get_admin_system_settings_keyboard() -> InlineKeyboardMarkup:
     ])
     return keyboard
 
+
+def get_mandatory_channels_keyboard() -> InlineKeyboardMarkup:
+    """Get mandatory channels management keyboard."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ اضافه کردن چنل", callback_data="admin:mandatory_channel:add"),
+        ],
+        [
+            InlineKeyboardButton(text="📋 لیست چنل‌ها", callback_data="admin:mandatory_channel:list:0"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:main"),
+        ],
+    ])
+    return keyboard
+
+
+def get_mandatory_channel_list_keyboard(channels, page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
+    """Get keyboard for listing mandatory channels."""
+    keyboard = []
+    
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    channels_page = channels[start_idx:end_idx]
+    
+    for channel in channels_page:
+        status = "✅" if channel.is_active else "❌"
+        channel_name = channel.channel_name or channel.channel_id
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{status} {channel_name}",
+                callback_data=f"admin:mandatory_channel:detail:{channel.id}"
+            )
+        ])
+    
+    # Pagination buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ قبلی", callback_data=f"admin:mandatory_channel:list:{page-1}"))
+    if end_idx < len(channels):
+        nav_buttons.append(InlineKeyboardButton(text="▶️ بعدی", callback_data=f"admin:mandatory_channel:list:{page+1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:mandatory_channels"),
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_mandatory_channel_detail_keyboard(channel_id: int) -> InlineKeyboardMarkup:
+    """Get keyboard for mandatory channel detail."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✏️ ویرایش", callback_data=f"admin:mandatory_channel:edit:{channel_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔄 فعال/غیرفعال", callback_data=f"admin:mandatory_channel:toggle:{channel_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🗑️ حذف", callback_data=f"admin:mandatory_channel:delete:{channel_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:mandatory_channel:list:0"),
+        ],
+    ])
+    return keyboard

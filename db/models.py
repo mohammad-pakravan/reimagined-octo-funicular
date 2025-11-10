@@ -995,3 +995,29 @@ class SystemSetting(Base):
     def __repr__(self):
         return f"<SystemSetting(id={self.id}, setting_key={self.setting_key}, setting_value={self.setting_value})>"
 
+
+class MandatoryChannel(Base):
+    """Model for storing mandatory channels that users must join."""
+    __tablename__ = "mandatory_channels"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    channel_id = Column(String(255), unique=True, nullable=False, index=True)  # Channel ID or username (e.g., @channel or -1001234567890)
+    channel_name = Column(String(255), nullable=True)  # Display name for the channel
+    channel_link = Column(String(512), nullable=True)  # Full link to the channel (e.g., https://t.me/channel)
+    is_active = Column(Boolean, default=True, nullable=False)  # Whether this channel requirement is active
+    order_index = Column(Integer, default=0, nullable=False)  # Order for displaying channels
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_by_admin_id = Column(Integer, nullable=True)  # Admin who created this channel requirement
+    
+    __table_args__ = (
+        Index('idx_channel_id', 'channel_id'),
+        Index('idx_is_active', 'is_active'),
+        Index('idx_order_index', 'order_index'),
+    )
+    
+    def __repr__(self):
+        return f"<MandatoryChannel(id={self.id}, channel_id={self.channel_id}, is_active={self.is_active})>"
+

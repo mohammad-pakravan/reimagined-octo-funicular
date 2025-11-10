@@ -149,6 +149,38 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_channel_check_keyboard(channels: list = None) -> InlineKeyboardMarkup:
+    """
+    Get keyboard for checking channel membership with channel links.
+    
+    Args:
+        channels: List of channel objects with channel_link and channel_name
+    """
+    keyboard = []
+    
+    # Add channel link buttons if provided
+    if channels:
+        for channel in channels:
+            channel_link = channel.get('link') or channel.get('channel_link')
+            channel_name = channel.get('name') or channel.get('channel_name') or 'چنل'
+            
+            if channel_link:
+                # Create URL button for channel
+                keyboard.append([
+                    InlineKeyboardButton(
+                        text=f"📺 {channel_name}",
+                        url=channel_link
+                    )
+                ])
+    
+    # Add check membership button
+    keyboard.append([
+        InlineKeyboardButton(text="✅ بررسی عضویت", callback_data="channel:check_membership"),
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 def get_dm_confirm_keyboard(receiver_id: int) -> InlineKeyboardMarkup:
     """
     Get confirmation keyboard for direct message.

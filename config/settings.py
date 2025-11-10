@@ -21,11 +21,16 @@ class Settings(BaseSettings):
     MYSQL_PASSWORD: str = Field(default="telecaht_pass", description="MySQL password")
     MYSQL_DATABASE: str = Field(default="telecaht", description="MySQL database name")
     
+    # Database connection pool configuration
+    DB_POOL_SIZE: int = Field(default=150, description="Database connection pool size")
+    DB_MAX_OVERFLOW: int = Field(default=50, description="Maximum overflow connections for database pool")
+    
     # Redis configuration
     REDIS_HOST: str = Field(default="localhost", description="Redis host")
     REDIS_PORT: int = Field(default=6379, description="Redis port")
     REDIS_DB: int = Field(default=0, description="Redis database number")
     REDIS_PASSWORD: str = Field(default="", description="Redis password (empty if not set)")
+    REDIS_MAX_CONNECTIONS: int = Field(default=50, description="Maximum Redis connection pool size")
     
     # MinIO configuration
     MINIO_ENDPOINT: str = Field(default="localhost:9000", description="MinIO endpoint")
@@ -66,6 +71,10 @@ class Settings(BaseSettings):
     MAX_CHAT_DURATION_MINUTES: int = Field(default=60, description="Maximum chat duration for free users")
     PREMIUM_CHAT_DURATION_MINUTES: int = Field(default=180, description="Maximum chat duration for premium users")
     MATCHMAKING_TIMEOUT_SECONDS: int = Field(default=300, description="Timeout for matchmaking in seconds")
+    
+    # Matchmaking worker configuration
+    MATCHMAKING_WORKER_INTERVAL: int = Field(default=1, description="Matchmaking worker check interval in seconds")
+    MATCHMAKING_WORKER_BATCH_SIZE: int = Field(default=5, description="Number of matches to process per worker cycle")
     
     # Rate limiting
     RATE_LIMIT_MESSAGES_PER_MINUTE: int = Field(default=20, description="Max messages per minute per user")

@@ -15,8 +15,8 @@ engine = create_async_engine(
     settings.mysql_url,
     echo=False,  # Set to True for SQL query logging
     pool_pre_ping=True,  # Verify connections before using
-    pool_size=20,  # Connection pool size
-    max_overflow=10,  # Maximum overflow connections
+    pool_size=settings.DB_POOL_SIZE,  # Connection pool size (default: 150)
+    max_overflow=settings.DB_MAX_OVERFLOW,  # Maximum overflow connections (default: 50)
     pool_recycle=3600,  # Recycle connections after 1 hour
 )
 
