@@ -118,15 +118,19 @@ class PointsManager:
         """
         # Get coins from database
         async for db_session in get_db():
-            coins = await get_coins_for_activity(db_session, "chat_success")
-            if coins is None:
-                coins = settings.POINTS_CHAT_SUCCESS  # Fallback to settings
+            coins_base = await get_coins_for_activity(db_session, "chat_success")
+            if coins_base is None:
+                coins_base = settings.POINTS_CHAT_SUCCESS  # Fallback to settings
             break
+        
+        # Calculate actual coins with multiplier for display
+        coins_user1_actual = await EventEngine.apply_points_multiplier(user1_id, coins_base, "chat_success")
+        coins_user2_actual = await EventEngine.apply_points_multiplier(user2_id, coins_base, "chat_success")
         
         # Award points to both users (with event multiplier if active)
         await PointsManager.award_points(
             user1_id,
-            coins,
+            coins_base,
             "chat_success",
             "Successful chat completion",
             user2_id
@@ -134,11 +138,71 @@ class PointsManager:
         
         await PointsManager.award_points(
             user2_id,
-            coins,
+            coins_base,
             "chat_success",
             "Successful chat completion",
             user1_id
         )
+        
+        # Get event info and send notifications if multiplier was applied
+        async for db_session in get_db():
+            from db.crud import get_user_by_id, get_active_events
+            from aiogram import Bot
+            
+            # Get event info for user1
+            user1_event_info = ""
+            if coins_user1_actual > coins_base:
+                events = await get_active_events(db_session, event_type="points_multiplier")
+                if events:
+                    event = events[0]
+                    config = await EventEngine.parse_event_config(event)
+                    apply_to_sources = config.get("apply_to_sources", [])
+                    if not apply_to_sources or "chat_success" in apply_to_sources:
+                        multiplier = config.get("multiplier", 1.0)
+                        user1_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_base} → سکه نهایی: {coins_user1_actual}"
+            
+            # Get event info for user2
+            user2_event_info = ""
+            if coins_user2_actual > coins_base:
+                events = await get_active_events(db_session, event_type="points_multiplier")
+                if events:
+                    event = events[0]
+                    config = await EventEngine.parse_event_config(event)
+                    apply_to_sources = config.get("apply_to_sources", [])
+                    if not apply_to_sources or "chat_success" in apply_to_sources:
+                        multiplier = config.get("multiplier", 1.0)
+                        user2_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_base} → سکه نهایی: {coins_user2_actual}"
+            
+            # Send notifications
+            user1 = await get_user_by_id(db_session, user1_id)
+            user2 = await get_user_by_id(db_session, user2_id)
+            
+            bot = Bot(token=settings.BOT_TOKEN)
+            try:
+                if user1:
+                    try:
+                        await bot.send_message(
+                            user1.telegram_id,
+                            f"🎉 چت موفقیت‌آمیز بود!\n\n"
+                            f"💰 {coins_user1_actual} سکه به حساب شما اضافه شد!{user1_event_info}\n\n"
+                            f"💡 با چت‌های بیشتر، سکه بیشتری دریافت می‌کنی!"
+                        )
+                    except Exception:
+                        pass
+                
+                if user2:
+                    try:
+                        await bot.send_message(
+                            user2.telegram_id,
+                            f"🎉 چت موفقیت‌آمیز بود!\n\n"
+                            f"💰 {coins_user2_actual} سکه به حساب شما اضافه شد!{user2_event_info}\n\n"
+                            f"💡 با چت‌های بیشتر، سکه بیشتری دریافت می‌کنی!"
+                        )
+                    except Exception:
+                        pass
+            finally:
+                await bot.session.close()
+            break
         
         # Track challenge progress for both users
         await EventEngine.track_challenge_progress(user1_id, "chat_count", 1)
@@ -160,15 +224,19 @@ class PointsManager:
         """
         # Get coins from database
         async for db_session in get_db():
-            coins = await get_coins_for_activity(db_session, "mutual_like")
-            if coins is None:
-                coins = settings.POINTS_MUTUAL_LIKE  # Fallback to settings
+            coins_base = await get_coins_for_activity(db_session, "mutual_like")
+            if coins_base is None:
+                coins_base = settings.POINTS_MUTUAL_LIKE  # Fallback to settings
             break
+        
+        # Calculate actual coins with multiplier for display
+        coins_user1_actual = await EventEngine.apply_points_multiplier(user1_id, coins_base, "mutual_like")
+        coins_user2_actual = await EventEngine.apply_points_multiplier(user2_id, coins_base, "mutual_like")
         
         # Award points to both users
         await PointsManager.award_points(
             user1_id,
-            coins,
+            coins_base,
             "mutual_like",
             "Mutual like",
             user2_id
@@ -176,11 +244,73 @@ class PointsManager:
         
         await PointsManager.award_points(
             user2_id,
-            coins,
+            coins_base,
             "mutual_like",
             "Mutual like",
             user1_id
         )
+        
+        # Get event info and send notifications if multiplier was applied
+        async for db_session in get_db():
+            from db.crud import get_user_by_id, get_active_events
+            from aiogram import Bot
+            
+            # Get event info for user1
+            user1_event_info = ""
+            if coins_user1_actual > coins_base:
+                events = await get_active_events(db_session, event_type="points_multiplier")
+                if events:
+                    event = events[0]
+                    config = await EventEngine.parse_event_config(event)
+                    apply_to_sources = config.get("apply_to_sources", [])
+                    if not apply_to_sources or "mutual_like" in apply_to_sources:
+                        multiplier = config.get("multiplier", 1.0)
+                        user1_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_base} → سکه نهایی: {coins_user1_actual}"
+            
+            # Get event info for user2
+            user2_event_info = ""
+            if coins_user2_actual > coins_base:
+                events = await get_active_events(db_session, event_type="points_multiplier")
+                if events:
+                    event = events[0]
+                    config = await EventEngine.parse_event_config(event)
+                    apply_to_sources = config.get("apply_to_sources", [])
+                    if not apply_to_sources or "mutual_like" in apply_to_sources:
+                        multiplier = config.get("multiplier", 1.0)
+                        user2_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_base} → سکه نهایی: {coins_user2_actual}"
+            
+            # Send notifications
+            user1 = await get_user_by_id(db_session, user1_id)
+            user2 = await get_user_by_id(db_session, user2_id)
+            
+            bot = Bot(token=settings.BOT_TOKEN)
+            try:
+                if user1:
+                    try:
+                        await bot.send_message(
+                            user1.telegram_id,
+                            f"💕 لایک متقابل!\n\n"
+                            f"✅ شما و طرف مقابل همدیگر را لایک کردید!\n\n"
+                            f"💰 {coins_user1_actual} سکه به حساب شما اضافه شد!{user1_event_info}\n\n"
+                            f"💡 با لایک‌های بیشتر، سکه بیشتری دریافت می‌کنی!"
+                        )
+                    except Exception:
+                        pass
+                
+                if user2:
+                    try:
+                        await bot.send_message(
+                            user2.telegram_id,
+                            f"💕 لایک متقابل!\n\n"
+                            f"✅ شما و طرف مقابل همدیگر را لایک کردید!\n\n"
+                            f"💰 {coins_user2_actual} سکه به حساب شما اضافه شد!{user2_event_info}\n\n"
+                            f"💡 با لایک‌های بیشتر، سکه بیشتری دریافت می‌کنی!"
+                        )
+                    except Exception:
+                        pass
+            finally:
+                await bot.session.close()
+            break
         
         return True
     
@@ -201,14 +331,18 @@ class PointsManager:
         """
         # Get coins from database
         async for db_session in get_db():
-            coins_referrer = await get_coins_for_activity(db_session, "referral_signup")
-            if coins_referrer is None:
-                coins_referrer = settings.POINTS_REFERRAL_REFERRER  # Fallback to settings
+            coins_referrer_base = await get_coins_for_activity(db_session, "referral_signup")
+            if coins_referrer_base is None:
+                coins_referrer_base = settings.POINTS_REFERRAL_REFERRER  # Fallback to settings
             
-            coins_referred = await get_coins_for_activity(db_session, "referral_referred_signup")
-            if coins_referred is None:
-                coins_referred = settings.POINTS_REFERRAL_REFERRED  # Fallback to settings
+            coins_referred_base = await get_coins_for_activity(db_session, "referral_referred_signup")
+            if coins_referred_base is None:
+                coins_referred_base = settings.POINTS_REFERRAL_REFERRED  # Fallback to settings
             break
+        
+        # Calculate actual coins with multiplier for display
+        coins_referrer_actual = await EventEngine.apply_points_multiplier(referrer_id, coins_referrer_base, "referral_signup")
+        coins_referred_actual = await EventEngine.apply_points_multiplier(referred_id, coins_referred_base, "referral_signup")
         
         # Check for event referral reward first (premium days)
         event_reward_given = await EventEngine.handle_referral_reward(referrer_id, referred_id)
@@ -217,7 +351,7 @@ class PointsManager:
         if not event_reward_given:
             await PointsManager.award_points(
                 referrer_id,
-                coins_referrer,
+                coins_referrer_base,
                 "referral_signup",
                 "Referral signup reward",
                 referred_id
@@ -226,11 +360,75 @@ class PointsManager:
         # Award points to referred user
         await PointsManager.award_points(
             referred_id,
-            coins_referred,
+            coins_referred_base,
             "referral_signup",
             "Welcome reward for using referral link",
             referrer_id
         )
+        
+        # Get event info and send notifications
+        async for db_session in get_db():
+            from db.crud import get_user_by_id, get_active_events
+            from aiogram import Bot
+            
+            # Get event info for referrer if multiplier was applied
+            referrer_event_info = ""
+            if coins_referrer_actual > coins_referrer_base:
+                events = await get_active_events(db_session, event_type="points_multiplier")
+                if events:
+                    event = events[0]
+                    config = await EventEngine.parse_event_config(event)
+                    apply_to_sources = config.get("apply_to_sources", [])
+                    if not apply_to_sources or "referral_signup" in apply_to_sources:
+                        multiplier = config.get("multiplier", 1.0)
+                        referrer_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_referrer_base} → سکه نهایی: {coins_referrer_actual}"
+            
+            # Get event info for referred user if multiplier was applied
+            referred_event_info = ""
+            if coins_referred_actual > coins_referred_base:
+                events = await get_active_events(db_session, event_type="points_multiplier")
+                if events:
+                    event = events[0]
+                    config = await EventEngine.parse_event_config(event)
+                    apply_to_sources = config.get("apply_to_sources", [])
+                    if not apply_to_sources or "referral_signup" in apply_to_sources:
+                        multiplier = config.get("multiplier", 1.0)
+                        referred_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_referred_base} → سکه نهایی: {coins_referred_actual}"
+            
+            # Send notifications
+            referrer = await get_user_by_id(db_session, referrer_id)
+            referred = await get_user_by_id(db_session, referred_id)
+            
+            bot = Bot(token=settings.BOT_TOKEN)
+            try:
+                # Notify referrer (only if didn't get premium from event)
+                if referrer and not event_reward_given:
+                    try:
+                        await bot.send_message(
+                            referrer.telegram_id,
+                            f"🎉 خبر خوب!\n\n"
+                            f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، عضو ربات شد!\n\n"
+                            f"💰 {coins_referrer_actual} سکه به حساب شما اضافه شد!{referrer_event_info}\n\n"
+                            f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
+                        )
+                    except Exception:
+                        pass
+                
+                # Notify referred user
+                if referred:
+                    try:
+                        await bot.send_message(
+                            referred.telegram_id,
+                            f"🎉 خوش آمدی!\n\n"
+                            f"✅ با لینک دعوت عضو شدی!\n\n"
+                            f"💰 {coins_referred_actual} سکه به حساب شما اضافه شد!{referred_event_info}\n\n"
+                            f"💡 با تکمیل پروفایلت، سکه بیشتری دریافت می‌کنی!"
+                        )
+                    except Exception:
+                        pass
+            finally:
+                await bot.session.close()
+            break
         
         # Track challenge progress
         await EventEngine.track_challenge_progress(referrer_id, "referral_count", 1)

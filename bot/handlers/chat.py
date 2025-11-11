@@ -139,13 +139,10 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         user_points = await get_user_points(db_session, user.id)
         
         # Prepare queue status message with beautiful UI
+        total_online = 983 + queue_count
         queue_status_text = (
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🔍 در حال جستجو...\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👥 وضعیت صف:\n"
-            f"• 👨 پسر: {gender_counts.get('male', 0)} نفر\n"
-            f"• 👩 دختر: {gender_counts.get('female', 0)} نفر\n\n"
+            "🔍 در حال جستجو...\n\n"
+            f"👥 افراد آنلاین: {total_online} نفر\n\n"
         )
         
         # Add cost information
@@ -352,17 +349,13 @@ async def try_find_match(telegram_id: int, db_session):
                     
                     # Prepare messages with beautiful UI
                     user_msg = (
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        "✅ هم‌چت پیدا شد!\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n\n"
+                        "✅ هم‌چت پیدا شد!\n\n"
                         "🎉 شما الان به هم متصل شدید!\n"
                         "💬 می‌تونید شروع به چت کنید.\n\n"
                     )
                     
                     matched_user_msg = (
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        "✅ هم‌چت پیدا شد!\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n\n"
+                        "✅ هم‌چت پیدا شد!\n\n"
                         "🎉 شما الان به هم متصل شدید!\n"
                         "💬 می‌تونید شروع به چت کنید.\n\n"
                     )
@@ -432,8 +425,6 @@ async def try_find_match(telegram_id: int, db_session):
                             f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی!\n\n"
                         )
                     
-                    user_msg += "━━━━━━━━━━━━━━━━━━━━"
-                    matched_user_msg += "━━━━━━━━━━━━━━━━━━━━"
                     
                     bot = Bot(token=settings.BOT_TOKEN)
                     
@@ -688,9 +679,7 @@ async def end_chat_confirm(callback: CallbackQuery):
             
             # Prepare end message for user with beautiful UI
             user_end_message = (
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "✅ چت به پایان رسید\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "✅ چت به پایان رسید\n\n"
             )
             
             if total_messages == 0:
@@ -758,14 +747,11 @@ async def end_chat_confirm(callback: CallbackQuery):
                     "💡 هیچ سکه‌ای کسر نشد.\n\n"
                 )
             
-            user_end_message += "━━━━━━━━━━━━━━━━━━━━\n"
             user_end_message += "بازگشت به منوی اصلی..."
             
             # Prepare end message for partner
             partner_end_message = (
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "✅ چت به پایان رسید\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "✅ چت به پایان رسید\n\n"
             )
             
             if total_messages == 0:
@@ -834,7 +820,6 @@ async def end_chat_confirm(callback: CallbackQuery):
                         "💡 هیچ سکه‌ای کسر نشد.\n\n"
                     )
             
-            partner_end_message += "━━━━━━━━━━━━━━━━━━━━\n"
             partner_end_message += "بازگشت به منوی اصلی..."
             
             # Send message to user (only once)
@@ -856,9 +841,7 @@ async def end_chat_confirm(callback: CallbackQuery):
             ])
             
             await callback.message.answer(
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "💬 چت شما قطع شد\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "💬 چت شما قطع شد\n\n"
                 "🔍 می‌خوای دوباره جستجو کنی؟",
                 reply_markup=search_again_keyboard
             )
@@ -886,9 +869,7 @@ async def end_chat_confirm(callback: CallbackQuery):
                     
                     await bot.send_message(
                         partner.telegram_id,
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        "💬 چت شما قطع شد\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n\n"
+                        "💬 چت شما قطع شد\n\n"
                         "🔍 می‌خوای دوباره جستجو کنی؟",
                         reply_markup=partner_search_again_keyboard
                     )
@@ -899,6 +880,11 @@ async def end_chat_confirm(callback: CallbackQuery):
             
             # Don't delete messages automatically - user can request deletion via button
             # Message IDs are stored in Redis and will be available for deletion request
+            
+            # Award coins for successful chat
+            if chat_successful and partner_id:
+                from core.points_manager import PointsManager
+                await PointsManager.award_chat_success(user.id, partner_id)
             
             # Check and award badges for chat achievements
             if chat_successful:

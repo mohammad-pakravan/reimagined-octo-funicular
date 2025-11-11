@@ -147,23 +147,96 @@ async def claim_daily_reward(callback: CallbackQuery):
         finally:
             await badge_bot.session.close()
         
+        # Calculate base points (without multiplier)
+        base_points = await RewardSystem.calculate_reward_points(reward_info['streak_count'])
+        
+        # Calculate actual points with multiplier
+        from core.event_engine import EventEngine
+        final_points = await EventEngine.apply_points_multiplier(user.id, base_points, "daily_login")
+        
+        # Get event info if multiplier was applied
+        event_info = ""
+        streak_multiplier_info = ""
+        if final_points > base_points:
+            from db.crud import get_active_events
+            events = await get_active_events(db_session, event_type="points_multiplier")
+            if events:
+                event = events[0]
+                config = await EventEngine.parse_event_config(event)
+                apply_to_sources = config.get("apply_to_sources", [])
+                if not apply_to_sources or "daily_login" in apply_to_sources:
+                    multiplier = config.get("multiplier", 1.0)
+                    event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {base_points} → سکه نهایی: {final_points}"
+                    
+                    # Calculate streak multiplier message
+                    if reward_info['streak_count'] > 1:
+                        if multiplier == 2.0:
+                            streak_multiplier_info = "\n🔥 استریک دو برابر سکه داد!"
+                        elif multiplier == 3.0:
+                            streak_multiplier_info = "\n🔥 استریک سه برابر سکه داد!"
+                        elif multiplier > 3.0:
+                            streak_multiplier_info = f"\n🔥 استریک {int(multiplier)} برابر سکه داد!"
+                        else:
+                            streak_multiplier_info = f"\n🔥 به خاطر ایونت، استریک {multiplier}x سکه بیشتر داد!"
+        
         if reward_info.get('already_claimed'):
-            await callback.message.edit_text(
-                f"🎁 پاداش روزانه\n\n"
-                f"✅ شما امروز پاداش خود را دریافت کرده‌اید!\n\n"
-                f"💰 سکه دریافت شده: {reward_info['points']}\n"
-                f"🔥 استریک: {reward_info['streak_count']} روز\n\n"
-                f"فردا دوباره بیا!",
-                reply_markup=get_daily_reward_keyboard(already_claimed=True)
-            )
+            # For already claimed, get the actual points from database
+            from db.crud import get_daily_reward
+            from datetime import date
+            today_reward = await get_daily_reward(db_session, user.id, date.today())
+            if today_reward:
+                # Recalculate with multiplier to show correct amount
+                base_claimed = today_reward.points_rewarded
+                final_claimed = await EventEngine.apply_points_multiplier(user.id, base_claimed, "daily_login")
+                
+                # Recalculate event info for already claimed
+                if final_claimed > base_claimed:
+                    events = await get_active_events(db_session, event_type="points_multiplier")
+                    if events:
+                        event = events[0]
+                        config = await EventEngine.parse_event_config(event)
+                        apply_to_sources = config.get("apply_to_sources", [])
+                        if not apply_to_sources or "daily_login" in apply_to_sources:
+                            multiplier = config.get("multiplier", 1.0)
+                            event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {base_claimed} → سکه نهایی: {final_claimed}"
+                            
+                            if reward_info['streak_count'] > 1:
+                                if multiplier == 2.0:
+                                    streak_multiplier_info = "\n🔥 استریک دو برابر سکه داد!"
+                                elif multiplier == 3.0:
+                                    streak_multiplier_info = "\n🔥 استریک سه برابر سکه داد!"
+                                elif multiplier > 3.0:
+                                    streak_multiplier_info = f"\n🔥 استریک {int(multiplier)} برابر سکه داد!"
+                                else:
+                                    streak_multiplier_info = f"\n🔥 به خاطر ایونت، استریک {multiplier}x سکه بیشتر داد!"
+                
+                await callback.message.edit_text(
+                    f"🎁 پاداش روزانه\n\n"
+                    f"✅ شما امروز پاداش خود را دریافت کرده‌اید!\n\n"
+                    f"💰 سکه دریافت شده: {final_claimed}{event_info}\n"
+                    f"🔥 استریک: {reward_info['streak_count']} روز{streak_multiplier_info}\n\n"
+                    f"فردا دوباره بیا!",
+                    reply_markup=get_daily_reward_keyboard(already_claimed=True)
+                )
+            else:
+                await callback.message.edit_text(
+                    f"🎁 پاداش روزانه\n\n"
+                    f"✅ شما امروز پاداش خود را دریافت کرده‌اید!\n\n"
+                    f"💰 سکه دریافت شده: {final_points}{event_info}\n"
+                    f"🔥 استریک: {reward_info['streak_count']} روز{streak_multiplier_info}\n\n"
+                    f"فردا دوباره بیا!",
+                    reply_markup=get_daily_reward_keyboard(already_claimed=True)
+                )
         else:
             streak_text = ""
             if reward_info['streak_count'] > 1:
                 streak_text = f"\n🔥 استریک: {reward_info['streak_count']} روز!"
+                if streak_multiplier_info:
+                    streak_text += streak_multiplier_info
             
             await callback.message.edit_text(
                 f"🎁 پاداش روزانه دریافت شد!\n\n"
-                f"💰 سکه دریافت شده: {reward_info['points']}{streak_text}\n\n"
+                f"💰 سکه دریافت شده: {final_points}{event_info}{streak_text}\n\n"
                 f"فردا دوباره بیا تا استریکت را ادامه بدهی!",
                 reply_markup=get_daily_reward_keyboard(already_claimed=False)
             )

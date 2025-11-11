@@ -360,7 +360,8 @@ async def process_start_date(message: Message, state: FSMContext):
             await message.answer("❌ فرمت تاریخ نامعتبر. لطفاً دوباره تلاش کنید:")
             return
     
-    await state.update_data(start_date=start_date)
+    # Convert datetime to ISO format string for JSON serialization
+    await state.update_data(start_date=start_date.isoformat())
     
     await message.answer(
         "تاریخ پایان ایونت:\n\n"
@@ -377,10 +378,13 @@ async def process_end_date(message: Message, state: FSMContext):
     text = message.text.strip()
     data = await state.get_data()
     
+    # Convert start_date from ISO string back to datetime
+    start_date = datetime.fromisoformat(data["start_date"])
+    
     # Calculate end date
     if text.isdigit():
         days = int(text)
-        end_date = data["start_date"] + timedelta(days=days)
+        end_date = start_date + timedelta(days=days)
     else:
         try:
             end_date = datetime.strptime(text, "%Y-%m-%d %H:%M")
@@ -400,7 +404,7 @@ async def process_end_date(message: Message, state: FSMContext):
             event_key=event_key,
             event_name=data["event_name"],
             event_type=data["event_type"],
-            start_date=data["start_date"],
+            start_date=start_date,
             end_date=end_date,
             created_by_admin_id=message.from_user.id,
             event_description=data.get("event_description"),

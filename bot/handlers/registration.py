@@ -248,16 +248,16 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                 )
                 
                 if not already_awarded:
-                    # Get coins for display
-                    coins_profile_complete = await get_coins_for_activity(db_session, "referral_profile_complete")
-                    if coins_profile_complete is None:
-                        coins_profile_complete = settings.POINTS_REFERRAL_REFERRER
+                    # Get base coins
+                    coins_profile_complete_base = await get_coins_for_activity(db_session, "referral_profile_complete")
+                    if coins_profile_complete_base is None:
+                        coins_profile_complete_base = settings.POINTS_REFERRAL_REFERRER
                     
-                    coins_referred = await get_coins_for_activity(db_session, "referral_referred_signup")
-                    if coins_referred is None:
-                        coins_referred = await get_coins_for_activity(db_session, "referral_referred")
-                        if coins_referred is None:
-                            coins_referred = settings.POINTS_REFERRAL_REFERRED
+                    coins_referred_base = await get_coins_for_activity(db_session, "referral_referred_signup")
+                    if coins_referred_base is None:
+                        coins_referred_base = await get_coins_for_activity(db_session, "referral_referred")
+                        if coins_referred_base is None:
+                            coins_referred_base = settings.POINTS_REFERRAL_REFERRED
                     
                     # Award profile completion points to both users
                     from core.points_manager import PointsManager
@@ -267,6 +267,45 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                         referral_code_obj.user_id,
                         user.id
                     )
+                    
+                    # Calculate actual coins with multiplier for display
+                    from core.event_engine import EventEngine
+                    coins_profile_complete_actual = await EventEngine.apply_points_multiplier(
+                        referral_code_obj.user_id,
+                        coins_profile_complete_base,
+                        "referral_profile_complete"
+                    )
+                    coins_referred_actual = await EventEngine.apply_points_multiplier(
+                        user.id,
+                        coins_referred_base,
+                        "referral_profile_complete"
+                    )
+                    
+                    # Get event info for referrer if multiplier was applied
+                    referrer_event_info = ""
+                    if coins_profile_complete_actual > coins_profile_complete_base:
+                        from db.crud import get_active_events
+                        events = await get_active_events(db_session, event_type="points_multiplier")
+                        if events:
+                            event = events[0]
+                            config = await EventEngine.parse_event_config(event)
+                            apply_to_sources = config.get("apply_to_sources", [])
+                            if not apply_to_sources or "referral_profile_complete" in apply_to_sources:
+                                multiplier = config.get("multiplier", 1.0)
+                                referrer_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_profile_complete_base} → سکه نهایی: {coins_profile_complete_actual}"
+                    
+                    # Get event info for referred user if multiplier was applied
+                    referred_event_info = ""
+                    if coins_referred_actual > coins_referred_base:
+                        from db.crud import get_active_events
+                        events = await get_active_events(db_session, event_type="points_multiplier")
+                        if events:
+                            event = events[0]
+                            config = await EventEngine.parse_event_config(event)
+                            apply_to_sources = config.get("apply_to_sources", [])
+                            if not apply_to_sources or "referral_profile_complete" in apply_to_sources:
+                                multiplier = config.get("multiplier", 1.0)
+                                referred_event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {coins_referred_base} → سکه نهایی: {coins_referred_actual}"
                     
                     # Check achievements
                     from db.crud import get_referral_count, get_user_by_id
@@ -286,7 +325,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                                 referrer.telegram_id,
                                 f"🎉 خبر خوب!\n\n"
                                 f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، پروفایلش را تکمیل کرد!\n\n"
-                                f"💰 {coins_profile_complete} سکه به حساب شما اضافه شد!\n\n"
+                                f"💰 {coins_profile_complete_actual} سکه به حساب شما اضافه شد!{referrer_event_info}\n\n"
                                 f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
                             )
                         except Exception:
@@ -298,9 +337,9 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                         await message.answer(
                         f"🎉 تبریک!\n\n"
                         f"✅ پروفایل شما تکمیل شد!\n\n"
-                        f"💰 {coins_referred} سکه به حساب شما اضافه شد!\n\n"
+                        f"💰 {coins_referred_actual} سکه به حساب شما اضافه شد!{referred_event_info}\n\n"
                         f"💡 با تکمیل پروفایل، سکه دریافت کردی!"
-                        )
+                    )
         
         # Clear registration data
         registration_data.pop(user_id, None)
