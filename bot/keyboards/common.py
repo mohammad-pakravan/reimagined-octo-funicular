@@ -90,6 +90,17 @@ def get_confirm_keyboard(action: str) -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_delete_account_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Get confirmation keyboard for account deletion."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ بله، حذف کن", callback_data="my_profile:delete_account:confirm"),
+            InlineKeyboardButton(text="❌ خیر، لغو", callback_data="my_profile:delete_account:cancel"),
+        ],
+    ])
+    return keyboard
+
+
 def get_premium_keyboard() -> InlineKeyboardMarkup:
     """Get keyboard for premium features."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -214,13 +225,16 @@ def get_dm_receive_keyboard(dm_id: int) -> InlineKeyboardMarkup:
 
 def get_dm_view_keyboard(dm_id: int, sender_id: int) -> InlineKeyboardMarkup:
     """
-    Get keyboard for viewing direct message with delete and block options.
+    Get keyboard for viewing direct message with delete, block, reply and back options.
     
     Args:
         dm_id: Direct message ID
         sender_id: Sender user ID
     """
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📝 پاسخ", callback_data=f"dm:reply_from_view:{sender_id}"),
+        ],
         [
             InlineKeyboardButton(text="🗑️ حذف پیام", callback_data=f"dm:delete:{dm_id}"),
             InlineKeyboardButton(text="🚫 بلاک کاربر", callback_data=f"dm:block:{sender_id}"),
@@ -286,6 +300,22 @@ def get_chat_request_keyboard(request_id: int, requester_id: int) -> InlineKeybo
         ],
         [
             InlineKeyboardButton(text="🚫 بلاک کاربر", callback_data=f"chat_request:block:{requester_id}"),
+        ],
+    ])
+    return keyboard
+
+
+def get_chat_request_cancel_keyboard(requester_id: int, receiver_id: int) -> InlineKeyboardMarkup:
+    """
+    Get keyboard for canceling chat request (for requester).
+    
+    Args:
+        requester_id: User ID who requested chat
+        receiver_id: User ID who received the request
+    """
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❌ لغو درخواست چت", callback_data=f"chat_request:cancel:{receiver_id}"),
         ],
     ])
     return keyboard

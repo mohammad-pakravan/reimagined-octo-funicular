@@ -2,10 +2,10 @@
 CRUD operations for database models.
 Provides functions to interact with User, ChatRoom, PremiumSubscription, and Report models.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_, or_, func
+from sqlalchemy import select, update, delete, and_, or_, func
 from sqlalchemy.orm import joinedload
 
 from db.models import (
@@ -21,9 +21,22 @@ from config.settings import settings
 
 # ============= User CRUD =============
 
-async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> Optional[User]:
-    """Get user by Telegram ID."""
-    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int, include_inactive: bool = False) -> Optional[User]:
+    """
+    Get user by Telegram ID.
+    
+    Args:
+        session: Database session
+        telegram_id: Telegram user ID
+        include_inactive: If True, include inactive (deleted) users. Default is False.
+    
+    Returns:
+        User object or None
+    """
+    query = select(User).where(User.telegram_id == telegram_id)
+    if not include_inactive:
+        query = query.where(User.is_active == True)
+    result = await session.execute(query)
     return result.scalar_one_or_none()
 
 
@@ -43,6 +56,7 @@ async def create_user(
     session: AsyncSession,
     telegram_id: int,
     username: Optional[str] = None,
+    display_name: Optional[str] = None,
     gender: Optional[str] = None,
     age: Optional[int] = None,
     province: Optional[str] = None,
@@ -57,6 +71,7 @@ async def create_user(
     user = User(
         telegram_id=telegram_id,
         username=username,
+        display_name=display_name,
         gender=gender,
         age=age,
         province=province,
@@ -74,6 +89,7 @@ async def update_user_profile(
     session: AsyncSession,
     telegram_id: int,
     username: Optional[str] = None,
+    display_name: Optional[str] = None,
     gender: Optional[str] = None,
     age: Optional[int] = None,
     province: Optional[str] = None,
@@ -93,6 +109,8 @@ async def update_user_profile(
     
     if username is not None:
         user.username = username
+    if display_name is not None:
+        user.display_name = display_name
     if gender is not None:
         user.gender = gender
     if age is not None:
@@ -117,6 +135,64 @@ async def ban_user(session: AsyncSession, user_id: int) -> bool:
     )
     await session.commit()
     return result.rowcount > 0
+
+
+async def delete_user_account(session: AsyncSession, user_id: int) -> bool:
+    """
+    Delete user account (soft delete by setting is_active=False).
+    
+    Args:
+        session: Database session
+        user_id: User database ID
+        
+    Returns:
+        bool: True if account was deleted, False otherwise
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Get user first to verify it exists
+    user = await session.get(User, user_id)
+    if not user:
+        logger.warning(f"User {user_id} not found for deletion")
+        return False
+    
+    logger.info(f"Deleting account for user {user_id} (telegram_id: {user.telegram_id}), current is_active: {user.is_active}, is_banned: {user.is_banned}")
+    
+    # Use direct UPDATE statement to ensure the change is applied
+    result = await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(
+            is_active=False,
+            is_banned=True,
+            updated_at=datetime.utcnow()
+        )
+    )
+    
+    logger.info(f"UPDATE statement executed for user {user_id}, rows affected: {result.rowcount}")
+    
+    # Commit the transaction
+    await session.commit()
+    logger.info(f"Committed changes for user {user_id}")
+    
+    # Verify the update was successful by querying database directly
+    # This ensures we get the actual state from database, not from session cache
+    result = await session.execute(
+        select(User).where(User.id == user_id)
+    )
+    updated_user = result.scalar_one_or_none()
+    
+    if updated_user:
+        logger.info(f"Verified user {user_id} from database, is_active: {updated_user.is_active}, is_banned: {updated_user.is_banned}")
+        if not updated_user.is_active:
+            return True
+        else:
+            logger.error(f"User {user_id} deletion failed: is_active is still True after commit!")
+            return False
+    else:
+        logger.error(f"User {user_id} not found in database after deletion attempt!")
+        return False
 
 
 async def unban_user(session: AsyncSession, user_id: int) -> bool:
@@ -674,6 +750,33 @@ async def get_direct_message_list(
     return message_list
 
 
+async def delete_conversation(
+    session: AsyncSession,
+    user1_id: int,
+    user2_id: int
+) -> int:
+    """
+    Delete all direct messages between two users (both sent and received).
+    Returns the number of deleted messages.
+    
+    Args:
+        session: Database session
+        user1_id: First user ID
+        user2_id: Second user ID
+    """
+    result = await session.execute(
+        delete(DirectMessage)
+        .where(
+            or_(
+                and_(DirectMessage.sender_id == user1_id, DirectMessage.receiver_id == user2_id),
+                and_(DirectMessage.sender_id == user2_id, DirectMessage.receiver_id == user1_id)
+            )
+        )
+    )
+    await session.commit()
+    return result.rowcount
+
+
 # ============= Chat End Notification CRUD =============
 
 async def create_chat_end_notification(
@@ -946,15 +1049,114 @@ async def get_referral_by_users(
     return result.scalar_one_or_none()
 
 
+async def check_telegram_id_used_referral_code(
+    session: AsyncSession,
+    telegram_id: int,
+    referral_code: str
+) -> bool:
+    """
+    Check if a telegram_id has previously used a referral code (even after account deletion).
+    This prevents abuse where users delete and recreate accounts to reuse referral codes.
+    
+    Args:
+        session: Database session
+        telegram_id: Telegram user ID
+        referral_code: Referral code to check
+        
+    Returns:
+        True if telegram_id has used this referral code before, False otherwise
+    """
+    result = await session.execute(
+        select(Referral)
+        .join(User, Referral.referred_id == User.id)
+        .where(User.telegram_id == telegram_id)
+        .where(Referral.referral_code == referral_code)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def check_telegram_id_claimed_daily_reward(
+    session: AsyncSession,
+    telegram_id: int,
+    reward_date: date
+) -> bool:
+    """
+    Check if a telegram_id has claimed daily reward on a specific date (even after account deletion).
+    This prevents abuse where users delete and recreate accounts to claim daily rewards multiple times.
+    
+    Args:
+        session: Database session
+        telegram_id: Telegram user ID
+        reward_date: Date to check
+        
+    Returns:
+        True if telegram_id has claimed reward on this date before, False otherwise
+    """
+    result = await session.execute(
+        select(DailyReward)
+        .join(User, DailyReward.user_id == User.id)
+        .where(User.telegram_id == telegram_id)
+        .where(DailyReward.reward_date == reward_date)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def check_telegram_id_received_profile_completion_reward(
+    session: AsyncSession,
+    telegram_id: int,
+    referrer_id: int
+) -> bool:
+    """
+    Check if a telegram_id has received profile completion reward for a specific referrer (even after account deletion).
+    This prevents abuse where users delete and recreate accounts to get profile completion rewards multiple times.
+    
+    Args:
+        session: Database session
+        telegram_id: Telegram user ID (referred user)
+        referrer_id: Referrer user ID
+        
+    Returns:
+        True if telegram_id has received profile completion reward for this referrer before, False otherwise
+    """
+    result = await session.execute(
+        select(PointsHistory)
+        .join(User, PointsHistory.user_id == User.id)
+        .where(User.telegram_id == telegram_id)
+        .where(PointsHistory.source == "referral_profile_complete")
+        .where(PointsHistory.related_user_id == referrer_id)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def create_referral(
     session: AsyncSession,
     referrer_id: int,
     referred_id: int,
     referral_code: str,
     points_rewarded_referrer: int = 0,
-    points_rewarded_referred: int = 0
+    points_rewarded_referred: int = 0,
+    check_telegram_id: Optional[int] = None
 ) -> Optional[Referral]:
-    """Create a referral relationship."""
+    """
+    Create a referral relationship.
+    
+    Args:
+        session: Database session
+        referrer_id: Referrer user ID
+        referred_id: Referred user ID
+        referral_code: Referral code
+        points_rewarded_referrer: Points rewarded to referrer
+        points_rewarded_referred: Points rewarded to referred user
+        check_telegram_id: Optional telegram_id to check if this telegram_id has used this code before
+        
+    Returns:
+        Referral object if created, None if already exists or telegram_id has used this code before
+    """
+    # Check if telegram_id has used this referral code before (prevent abuse)
+    if check_telegram_id:
+        if await check_telegram_id_used_referral_code(session, check_telegram_id, referral_code):
+            return None  # Telegram ID has used this code before
+    
     # Check if referral already exists
     result = await session.execute(
         select(Referral)

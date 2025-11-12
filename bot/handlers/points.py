@@ -48,7 +48,12 @@ async def points_info(callback: CallbackQuery):
         
         referral_coins = await get_coins_for_activity(db_session, "referral_referrer")
         if referral_coins is None:
-            referral_coins = settings.POINTS_REFERRAL_REFERRER
+            # Try fallback to referral_signup or referral_profile_complete
+            referral_coins = await get_coins_for_activity(db_session, "referral_signup")
+            if referral_coins is None:
+                referral_coins = await get_coins_for_activity(db_session, "referral_profile_complete")
+                if referral_coins is None:
+                    referral_coins = 0  # No fallback - admin must set this in database
         
         await callback.message.edit_text(
             f"⭐ سکه‌ها\n\n"

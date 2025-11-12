@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # Channel configuration
     MANDATORY_CHANNEL_ID: str = Field(..., description="Channel ID that users must join before using chat")
     
+    # Support configuration
+    SUPPORT_ADMIN: str = Field(default="", description="Telegram link for support/admin contact")
+    
     # Admin configuration (comma-separated string in env, converted to list)
     ADMIN_IDS: Union[str, List[int]] = Field(default="", description="Comma-separated admin Telegram user IDs")
     

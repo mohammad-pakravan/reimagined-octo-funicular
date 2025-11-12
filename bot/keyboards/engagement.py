@@ -226,7 +226,7 @@ def get_daily_reward_keyboard(already_claimed: bool = False) -> InlineKeyboardMa
         ])
     
     keyboard.append([
-        InlineKeyboardButton(text="📊 وضعیت استریک", callback_data="daily_reward:streak"),
+        InlineKeyboardButton(text="📊 وضعیت سکه ی روزانه", callback_data="daily_reward:streak"),
     ])
     
     keyboard.append([

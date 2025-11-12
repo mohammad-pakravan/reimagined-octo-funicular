@@ -509,6 +509,12 @@ async def handle_chat_request(callback: CallbackQuery, state: FSMContext):
                 await callback.answer("❌ شما در حال حاضر در یک چت فعال هستید. لطفاً ابتدا چت فعلی را پایان دهید.", show_alert=True)
                 return
         
+        # Check if user has a pending chat request to this partner
+        from bot.handlers.chat_request import has_pending_chat_request
+        if await has_pending_chat_request(user.id, partner.id):
+            await callback.answer("⏳  شما یک درخواست چت برای این کاربر ارسال کرده‌اید. لطفاً منتظر پاسخ بمانید...", show_alert=True)
+            return
+        
         # Set FSM state to wait for request message
         await state.update_data(chat_request_receiver_id=partner.id)
         await state.set_state("chat_request:waiting_message")

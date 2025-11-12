@@ -10,6 +10,7 @@ from db.crud import get_user_by_telegram_id
 from bot.keyboards.reply import get_main_reply_keyboard, get_chat_reply_keyboard
 from bot.keyboards.common import get_chat_keyboard, get_preferred_gender_keyboard
 from core.chat_manager import ChatManager
+from config.settings import settings
 
 router = Router()
 
@@ -45,6 +46,15 @@ async def start_chat_button(message: Message, state: FSMContext):
             await message.answer("❌ شما در حال حاضر یک چت فعال دارید!")
             return
         
+        # Check if user is already in queue
+        from bot.handlers.chat import matchmaking_queue as mm_queue
+        if mm_queue and await mm_queue.is_user_in_queue(user_id):
+            await message.answer(
+                "⏳ در حال جستجو هستی ! 🔍\n\n"
+                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️"
+            )
+            return
+        
         # Ask for preferred gender
         await message.answer(
             "💬 شروع چت ناشناس\n\n"
@@ -75,9 +85,10 @@ async def my_profile_button(message: Message):
             from core.badge_manager import BadgeManager
             user_badges_display = await BadgeManager.get_user_badges_display(user.id, limit=5)
             
+            from utils.validators import get_display_name
             profile_text = (
                 f"📊 پروفایل من\n\n"
-                f"• نام: {user.username or 'تعیین نشده'}\n"
+                f"• نام: {get_display_name(user)}\n"
                 f"• جنسیت: {gender_text}\n"
                 f"• استان: {user.province or 'تعیین نشده'}\n"
                 f"• شهر: {user.city or 'تعیین نشده'}\n"
@@ -117,9 +128,82 @@ async def my_profile_button(message: Message):
 
 @router.message(F.text == "💎 پریمیوم")
 async def premium_button(message: Message):
-    """Handle 'Premium' reply button."""
-    # Redirect to unified premium and rewards menu
-    await engagement_button(message)
+    """Handle 'Premium' reply button - show premium purchase menu."""
+    user_id = message.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import get_user_by_telegram_id, check_user_premium, get_visible_premium_plans
+        from bot.keyboards.premium_plan import get_user_premium_plans_keyboard
+        from bot.keyboards.common import get_premium_keyboard
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await message.answer("❌ کاربر یافت نشد.")
+            break
+        
+        is_premium = await check_user_premium(db_session, user.id)
+        
+        if is_premium:
+            expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "هرگز"
+            await message.answer(
+                f"💎 وضعیت پریمیوم\n\n"
+                f"✅ شما اشتراک پریمیوم فعال دارید!\n\n"
+                f"تاریخ انقضا: {expires_at}\n\n"
+                f"ویژگی‌های پریمیوم:\n"
+                f"• تماس تصویری در وب اپ ( به زودی )\n"
+                f"• ارتباط بدون مصرف سکه\n"
+                f"• فیلترهای پیشرفته ( به زودی )\n"
+                f"• اولویت در صف (نفر اول صف)"
+            )
+        else:
+            # Get premium plans from database
+            plans = await get_visible_premium_plans(db_session)
+            
+            if plans:
+                text = "💎 اشتراک پریمیوم\n\n"
+                text += "با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                text += "• تماس تصویری در وب اپ ( به زودی )\n"
+                text += "• ارتباط بدون مصرف سکه\n"
+                text += "• فیلترهای پیشرفته ( به زودی )\n"
+                text += "• اولویت در صف (نفر اول صف)\n\n"
+                text += "🎁 پلن‌های موجود:\n\n"
+                
+                from datetime import datetime
+                now = datetime.utcnow()
+                for plan in plans:
+                    discount_text = ""
+                    if plan.discount_start_date and plan.discount_end_date:
+                        if plan.discount_start_date <= now <= plan.discount_end_date:
+                            discount_text = f" 🔥 {plan.discount_percent}% تخفیف"
+                    
+                    text += f"💎 {plan.plan_name}\n"
+                    if plan.original_price and plan.price < plan.original_price:
+                        text += f"   ~~{int(plan.original_price):,}~~ {int(plan.price):,} تومان{discount_text}\n"
+                    else:
+                        text += f"   {int(plan.price):,} تومان\n"
+                    text += f"   ⏰ {plan.duration_days} روز\n\n"
+                
+                text += "پلن مورد نظر را انتخاب کنید:"
+                
+                await message.answer(
+                    text,
+                    reply_markup=get_user_premium_plans_keyboard(plans)
+                )
+            else:
+                # Fallback to default if no plans
+                await message.answer(
+                    f"💎 اشتراک پریمیوم\n\n"
+                    f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                    f"• تماس تصویری در وب اپ ( به زودی )\n"
+                    f"• ارتباط بدون مصرف سکه\n"
+                    f"• فیلترهای پیشرفته ( به زودی )\n"
+                    f"• اولویت در صف (نفر اول صف)\n\n"
+                    f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
+                    f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
+                    f"آیا می‌خواهید پریمیوم بخرید?",
+                    reply_markup=get_premium_keyboard()
+                )
+        break
 
 
 @router.message(F.text == "👤 پروفایل مخاطب")
@@ -383,7 +467,7 @@ async def start_voice_call_button(message: Message):
         break
 
 
-@router.message(F.text.in_({"🔒 حالت خصوصی", "🔒 فعال کردن حالت خصوصی", "🔓 غیرفعال کردن حالت خصوصی"}))
+@router.message(F.text.in_({"🟢 حالت خصوصی", "⚪ حالت خصوصی", "🔒 حالت خصوصی", "🔒 فعال کردن حالت خصوصی", "🔓 غیرفعال کردن حالت خصوصی"}))
 async def toggle_private_mode_button(message: Message):
     """Handle 'Private Mode' reply button."""
     user_id = message.from_user.id
@@ -656,6 +740,144 @@ async def engagement_button(message: Message):
         await message.answer(
             text,
             reply_markup=get_premium_rewards_menu_keyboard(is_premium=is_premium)
+        )
+        break
+
+
+@router.message(F.text == "💰 سکه ی رایگان")
+async def free_coins_menu(message: Message):
+    """Show daily reward menu when user clicks free coins button."""
+    user_id = message.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await message.answer("❌ کاربر یافت نشد.")
+            return
+        
+        from core.reward_system import RewardSystem
+        from bot.keyboards.engagement import get_daily_reward_keyboard
+        
+        # Get streak info
+        streak_info = await RewardSystem.get_streak_info(user.id)
+        
+        # Check if can claim today
+        can_claim_today = streak_info.get('can_claim_today', False)
+        
+        if can_claim_today:
+            text = (
+                "💰 سکه ی رایگان روزانه\n\n"
+                "🎁 امروز می‌توانی سکه رایگان دریافت کنی!\n\n"
+                "روی دکمه زیر کلیک کن تا سکه‌هایت را دریافت کنی:"
+            )
+        else:
+            points_claimed = streak_info.get('points_claimed', 0)
+            streak_count = streak_info.get('streak_count', 0)
+            text = (
+                "💰 سکه ی رایگان روزانه\n\n"
+                f"✅ شما امروز سکه خود را دریافت کرده‌اید!\n\n"
+                f"💰 سکه دریافت شده: {points_claimed}\n"
+            )
+            if streak_count > 0:
+                text += f"🔥 سکه ی روزانه: {streak_count} روز\n\n"
+            text += "فردا دوباره بیا تا سکه ی روزانه‌ات را ادامه بدهی!"
+        
+        await message.answer(
+            text,
+            reply_markup=get_daily_reward_keyboard(already_claimed=not can_claim_today)
+        )
+        break
+
+
+@router.message(F.text == "👥 دعوت دوستان( سکه رایگان )")
+async def referral_menu(message: Message):
+    """Show referral menu when user clicks referral button."""
+    user_id = message.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await message.answer("❌ کاربر یافت نشد.")
+            return
+        
+        from db.crud import get_or_create_user_referral_code, get_referral_count, get_coins_for_activity
+        from bot.keyboards.engagement import get_referral_menu_keyboard
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        referral_code_obj = await get_or_create_user_referral_code(db_session, user.id)
+        referral_count = await get_referral_count(db_session, user.id)
+        
+        # Get coin rewards from database
+        coins_profile_complete = await get_coins_for_activity(db_session, "referral_profile_complete")
+        if coins_profile_complete is None:
+            # Try fallback to old referral_referrer
+            coins_profile_complete = await get_coins_for_activity(db_session, "referral_referrer")
+            if coins_profile_complete is None:
+                coins_profile_complete = 0
+        
+        # Get bot username
+        try:
+            bot_info = await message.bot.get_me()
+            bot_username = bot_info.username or "bot"
+        except Exception:
+            bot_username = "bot"
+        
+        referral_link = f"https://t.me/{bot_username}?start=ref_{referral_code_obj.referral_code}"
+        
+        # Calculate total points (approximate, as we don't know how many completed profile)
+        total_points = referral_count * coins_profile_complete
+        
+        # First message: Statistics and instructions
+        stats_text = (
+            f"👥 دعوت دوستان (سکه رایگان)\n\n"
+            f"📊 آمار شما:\n"
+            f"• تعداد دعوت‌ها: {referral_count}\n"
+        )
+        
+        if coins_profile_complete > 0:
+            stats_text += f"• سکه برای هر دعوت: {coins_profile_complete}\n"
+            stats_text += f"• سکه کل (تقریبی): {total_points}\n\n"
+        
+        stats_text += (
+            "💡 چگونه دعوت کنم؟\n"
+            "1️⃣ لینک دعوت را از پیام بعدی کپی کنید\n"
+            "2️⃣ برای دوستان خود ارسال کنید\n"
+            "3️⃣ وقتی دوست شما ثبت‌نام کند، هر دو نفر سکه دریافت می‌کنید!\n\n"
+            "🎁 پاداش‌ها:\n"
+            "• وقتی دوست شما ثبت‌نام کند: هر دو نفر سکه می‌گیرید\n"
+            "• وقتی دوست شما پروفایل را تکمیل کند: هر دو نفر سکه بیشتری می‌گیرید"
+        )
+        
+        await message.answer(
+            stats_text,
+            reply_markup=get_referral_menu_keyboard()
+        )
+        
+        # Second message: Forwardable referral link message
+        forward_text = (
+            f"🎉 به ربات چت ناشناس خوش آمدید!\n\n"
+            f"💬 با این ربات می‌توانید:\n"
+            f"• با کاربران دیگر چت کنید\n"
+            f"• دوستان جدید پیدا کنید\n"
+            f"• سکه رایگان دریافت کنید\n\n"
+            f"🔗 برای عضویت روی لینک زیر کلیک کنید:\n"
+            f"{referral_link}\n\n"
+            f"🎁 با عضویت از طریق این لینک، هر دو نفر سکه رایگان دریافت می‌کنید!"
+        )
+        
+        # Create keyboard with referral link button
+        share_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔗 عضویت در ربات",
+                    url=referral_link
+                )
+            ]
+        ])
+        
+        await message.answer(
+            forward_text,
+            reply_markup=share_keyboard
         )
         break
 

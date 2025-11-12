@@ -11,6 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from db.database import get_db
 from db.crud import get_user_by_telegram_id, create_user, update_user_profile
+from db.models import User
 from bot.keyboards.common import (
     get_gender_keyboard,
     get_registration_skip_keyboard,
@@ -27,6 +28,7 @@ class RegistrationStates(StatesGroup):
     waiting_gender = State()
     waiting_age = State()
     waiting_city = State()
+    waiting_display_name = State()
     waiting_photo = State()
     waiting_username = State()
 
@@ -117,6 +119,34 @@ async def process_city(message: Message, state: FSMContext):
     registration_data[user_id]["city"] = city
     
     await message.answer(
+        "عالی! حالا یک نام نمایشی برای خودت انتخاب کن:\n"
+        "لطفاً نام نمایشی خودت را بفرست (حداکثر 50 کاراکتر):",
+        reply_markup=remove_keyboard()
+    )
+    await state.set_state(RegistrationStates.waiting_display_name)
+
+
+@router.message(StateFilter(RegistrationStates.waiting_display_name))
+async def process_display_name(message: Message, state: FSMContext):
+    """Process display name input."""
+    display_name = message.text.strip()
+    user_id = message.from_user.id
+    
+    # Validate display name
+    if not display_name or len(display_name) < 2:
+        await message.answer("❌ نام نمایشی باید حداقل 2 کاراکتر باشد.\n\nلطفاً دوباره نام نمایشی خودت را بفرست:")
+        return
+    
+    if len(display_name) > 50:
+        await message.answer("❌ نام نمایشی نمی‌تواند بیشتر از 50 کاراکتر باشد.\n\nلطفاً دوباره نام نمایشی خودت را بفرست:")
+        return
+    
+    # Store display name
+    if user_id not in registration_data:
+        registration_data[user_id] = {}
+    registration_data[user_id]["display_name"] = display_name
+    
+    await message.answer(
         "خوب! حالا عکس پروفایل خودت را بفرست (یا رد کن):",
         reply_markup=get_registration_skip_keyboard()
     )
@@ -155,17 +185,32 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
     username = message.from_user.username
     user_data = registration_data.get(user_id, {})
     
-    # Get or create user
+    # Get or create user (including inactive users)
     async for db_session in get_db():
-        user = await get_user_by_telegram_id(db_session, user_id)
+        # Check for existing user including inactive ones
+        user = await get_user_by_telegram_id(db_session, user_id, include_inactive=True)
         is_new_user = user is None
         
         if user:
-            # Update existing user
+            # User exists (active or inactive)
+            # If inactive, reactivate the account
+            if not user.is_active:
+                from sqlalchemy import update
+                await db_session.execute(
+                    update(User)
+                    .where(User.id == user.id)
+                    .values(is_active=True, is_banned=False)
+                )
+                await db_session.commit()
+                # Refresh user to get updated state
+                await db_session.refresh(user)
+            
+            # Update existing user profile
             await update_user_profile(
                 db_session,
                 user_id,
                 username=username,
+                display_name=user_data.get("display_name"),
                 gender=user_data.get("gender"),
                 age=user_data.get("age"),
                 city=user_data.get("city"),
@@ -177,6 +222,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                 db_session,
                 telegram_id=user_id,
                 username=username,
+                display_name=user_data.get("display_name"),
                 gender=user_data.get("gender"),
                 age=user_data.get("age"),
                 city=user_data.get("city"),
@@ -204,13 +250,20 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
             # New user with referral code - create referral relationship
             # Points will be awarded when profile is completed
             if referral_code_obj.user_id != user.id:
-                # Create referral
-                await create_referral(
-                    db_session,
-                    referral_code_obj.user_id,
-                    user.id,
-                    referral_code
-                )
+                # Check if this telegram_id has used this referral code before (prevent abuse)
+                from db.crud import check_telegram_id_used_referral_code
+                if await check_telegram_id_used_referral_code(db_session, user_id, referral_code):
+                    # User has used this code before, don't create referral
+                    pass
+                else:
+                    # Create referral
+                    await create_referral(
+                        db_session,
+                        referral_code_obj.user_id,
+                        user.id,
+                        referral_code,
+                        check_telegram_id=user_id
+                    )
                 
                 await message.answer(
                     f"✅ عضویت شما از طریق لینک دعوت ثبت شد!\n\n"
@@ -247,17 +300,29 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                     for ph in points_history
                 )
                 
+                # Also check if this telegram_id has received profile completion reward for this referrer before (prevent abuse)
                 if not already_awarded:
-                    # Get base coins
+                    from db.crud import check_telegram_id_received_profile_completion_reward
+                    already_awarded = await check_telegram_id_received_profile_completion_reward(
+                        db_session,
+                        user_id,
+                        referral_code_obj.user_id
+                    )
+                
+                if not already_awarded:
+                    # Get base coins from database (must be set by admin)
                     coins_profile_complete_base = await get_coins_for_activity(db_session, "referral_profile_complete")
                     if coins_profile_complete_base is None:
-                        coins_profile_complete_base = settings.POINTS_REFERRAL_REFERRER
+                        # Try fallback to old referral_referrer
+                        coins_profile_complete_base = await get_coins_for_activity(db_session, "referral_referrer")
+                        if coins_profile_complete_base is None:
+                            coins_profile_complete_base = 0
                     
                     coins_referred_base = await get_coins_for_activity(db_session, "referral_referred_signup")
                     if coins_referred_base is None:
                         coins_referred_base = await get_coins_for_activity(db_session, "referral_referred")
                         if coins_referred_base is None:
-                            coins_referred_base = settings.POINTS_REFERRAL_REFERRED
+                            coins_referred_base = 0
                     
                     # Award profile completion points to both users
                     from core.points_manager import PointsManager

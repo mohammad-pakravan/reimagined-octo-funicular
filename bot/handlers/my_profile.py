@@ -19,6 +19,7 @@ from db.crud import (
     unblock_user,
     unlike_user,
     get_user_by_id,
+    delete_user_account,
 )
 from bot.keyboards.my_profile import (
     get_my_profile_keyboard,
@@ -27,7 +28,7 @@ from bot.keyboards.my_profile import (
     get_liked_list_keyboard,
 )
 from bot.keyboards.reply import get_main_reply_keyboard
-from bot.keyboards.common import get_gender_keyboard
+from bot.keyboards.common import get_gender_keyboard, get_delete_account_confirm_keyboard
 from utils.validators import validate_age, parse_age, validate_city
 
 router = Router()
@@ -76,19 +77,31 @@ async def check_and_notify_profile_completion(db_session, user_id: int):
         for ph in points_history
     )
     
+    # Also check if this telegram_id has received profile completion reward for this referrer before (prevent abuse)
+    if not already_awarded:
+        from db.crud import check_telegram_id_received_profile_completion_reward
+        already_awarded = await check_telegram_id_received_profile_completion_reward(
+            db_session,
+            user.telegram_id,
+            referral.referrer_id
+        )
+    
     if already_awarded:
         return
     
-    # Get base coins
+    # Get base coins from database (must be set by admin)
     coins_profile_complete_base = await get_coins_for_activity(db_session, "referral_profile_complete")
     if coins_profile_complete_base is None:
-        coins_profile_complete_base = settings.POINTS_REFERRAL_REFERRER
+        # Try fallback to old referral_referrer
+        coins_profile_complete_base = await get_coins_for_activity(db_session, "referral_referrer")
+        if coins_profile_complete_base is None:
+            coins_profile_complete_base = 0
     
     coins_referred_base = await get_coins_for_activity(db_session, "referral_referred_signup")
     if coins_referred_base is None:
         coins_referred_base = await get_coins_for_activity(db_session, "referral_referred")
         if coins_referred_base is None:
-            coins_referred_base = settings.POINTS_REFERRAL_REFERRED
+            coins_referred_base = 0
     
     # Award profile completion points to both users
     await PointsManager.award_referral_profile_complete(
@@ -203,7 +216,7 @@ async def view_my_profile(callback: CallbackQuery):
         
         profile_text = (
             f"📊 پروفایل من\n\n"
-            f"• نام: {user.username or 'تعیین نشده'}\n"
+            f"• نام: {get_display_name(user)}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {user.province or 'تعیین نشده'}\n"
             f"• شهر: {user.city or 'تعیین نشده'}\n"
@@ -632,7 +645,7 @@ async def unfollow_user_from_list(callback: CallbackQuery):
         success = await unfollow_user(db_session, user.id, followed_id)
         
         if success:
-            await callback.answer(f"✅ {followed_user.username or 'کاربر'} آنفالو شد!")
+            await callback.answer(f"✅ {get_display_name(followed_user)} آنفالو شد!")
             
             # Refresh list
             following_list = await get_following_list(db_session, user.id)
@@ -859,7 +872,7 @@ async def unlike_user_from_list(callback: CallbackQuery):
         success = await unlike_user(db_session, user.id, liked_user_id)
         
         if success:
-            await callback.answer(f"❤️ لایک {liked_user.username or 'کاربر'} برداشته شد!")
+            await callback.answer(f"❤️ لایک {get_display_name(liked_user)} برداشته شد!")
             
             # Refresh list
             liked_list = await get_liked_list(db_session, user.id)
@@ -964,7 +977,7 @@ async def unblock_user_from_list(callback: CallbackQuery):
         success = await unblock_user(db_session, user.id, blocked_id)
         
         if success:
-            await callback.answer(f"✅ {blocked_user.username or 'کاربر'} آنبلاک شد!")
+            await callback.answer(f"✅ {get_display_name(blocked_user)} آنبلاک شد!")
             
             # Refresh list
             blocked_list = await get_blocked_list(db_session, user.id)
@@ -1010,7 +1023,7 @@ async def back_to_my_profile(callback: CallbackQuery):
         
         profile_text = (
             f"📊 پروفایل من\n\n"
-            f"• نام: {user.username or 'تعیین نشده'}\n"
+            f"• نام: {get_display_name(user)}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {user.province or 'تعیین نشده'}\n"
             f"• شهر: {user.city or 'تعیین نشده'}\n"
@@ -1067,4 +1080,105 @@ async def show_direct_messages_list(callback: CallbackQuery):
             await callback.message.answer(list_text, reply_markup=keyboard)
         await callback.answer()
         break
+
+
+@router.callback_query(F.data == "my_profile:delete_account")
+async def delete_account_confirm(callback: CallbackQuery):
+    """Show confirmation for account deletion."""
+    await callback.message.answer(
+        "⚠️ هشدار: حذف اکانت\n\n"
+        "آیا مطمئن هستید که می‌خواهید اکانت خود را حذف کنید؟\n\n"
+        "❌ با حذف اکانت:\n"
+        "• تمام اطلاعات پروفایل شما حذف می‌شود\n"
+        "• تمام چت‌ها و پیام‌های شما حذف می‌شود\n"
+        "• دیگر نمی‌توانید از ربات استفاده کنید\n\n"
+        "⚠️ این عمل غیرقابل بازگشت است!",
+        reply_markup=get_delete_account_confirm_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "my_profile:delete_account:confirm")
+async def delete_account_execute(callback: CallbackQuery):
+    """Execute account deletion."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        # Get user including inactive users (for deletion)
+        user = await get_user_by_telegram_id(db_session, user_id, include_inactive=True)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        # Check if user has active chat and end it
+        from db.crud import get_active_chat_room_by_user, get_user_by_id, end_chat_room
+        from bot.handlers.chat import chat_manager
+        from bot.handlers.chat import matchmaking_queue
+        
+        chat_room = await get_active_chat_room_by_user(db_session, user.id)
+        if chat_room and chat_manager:
+            # Get partner before ending chat
+            partner_id = None
+            if chat_room.user1_id == user.id:
+                partner_id = chat_room.user2_id
+            else:
+                partner_id = chat_room.user1_id
+            
+            partner = None
+            if partner_id:
+                partner = await get_user_by_id(db_session, partner_id)
+            
+            # End chat room using chat_manager
+            await chat_manager.end_chat(chat_room.id, db_session)
+            
+            # Notify partner if exists
+            if partner:
+                from aiogram import Bot
+                bot = Bot(token=settings.BOT_TOKEN)
+                try:
+                    await bot.send_message(
+                        partner.telegram_id,
+                        "ℹ️ هم‌چت شما اکانت خود را حذف کرد و چت به پایان رسید."
+                    )
+                    await bot.session.close()
+                except Exception:
+                    pass
+        
+        # Remove user from matchmaking queue if exists
+        # Note: matchmaking_queue uses telegram_id, not database id
+        if matchmaking_queue:
+            try:
+                if await matchmaking_queue.is_user_in_queue(user_id):
+                    await matchmaking_queue.remove_user_from_queue(user_id)
+            except Exception:
+                pass
+        
+        # Delete account (soft delete)
+        success = await delete_user_account(db_session, user.id)
+        
+        if success:
+            # Verify deletion by querying database again
+            deleted_user = await get_user_by_telegram_id(db_session, user_id, include_inactive=True)
+            
+            if deleted_user and not deleted_user.is_active:
+                await callback.message.edit_text(
+                    "✅ اکانت شما با موفقیت حذف شد.\n\n"
+                    "متأسفیم که شما را از دست دادیم. امیدواریم در آینده دوباره به ما بپیوندید! 👋"
+                )
+                await callback.answer("✅ اکانت حذف شد")
+            else:
+                await callback.answer("❌ خطا در حذف اکانت. لطفاً دوباره تلاش کنید.", show_alert=True)
+        else:
+            await callback.answer("❌ خطا در حذف اکانت. لطفاً دوباره تلاش کنید.", show_alert=True)
+        break
+
+
+@router.callback_query(F.data == "my_profile:delete_account:cancel")
+async def delete_account_cancel(callback: CallbackQuery):
+    """Cancel account deletion."""
+    await callback.message.edit_text(
+        "✅ حذف اکانت لغو شد.\n\n"
+        "اکانت شما همچنان فعال است."
+    )
+    await callback.answer("✅ لغو شد")
 

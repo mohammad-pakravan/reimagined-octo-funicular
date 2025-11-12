@@ -3,7 +3,7 @@ Chat handler for the bot.
 Handles starting chat, ending chat, and video call requests.
 """
 import asyncio
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -90,7 +90,11 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         
         # Check if user is already in queue
         if await matchmaking_queue.is_user_in_queue(user_id):
-            await callback.answer("⏳ شما در صف هستید. لطفاً صبر کنید...", show_alert=True)
+            await callback.answer(
+                "⏳ در حال جستجو هستی ! 🔍\n\n"
+                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                show_alert=True
+            )
             return
         
         await callback.answer()
@@ -192,10 +196,36 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         
         await state.clear()
         
+        # Create timeout task - if no match found after 2 minutes, notify user
+        asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
+        
         # Don't call try_find_match here - let the worker handle matching
         # This prevents duplicate messages
         # The worker will handle matching in the background
         break
+
+
+async def check_matchmaking_timeout(user_id: int, telegram_id: int):
+    """Check if user is still in queue after 2 minutes and notify if no match found."""
+    await asyncio.sleep(120)  # Wait 2 minutes
+    
+    # Check if user is still in queue
+    if matchmaking_queue and await matchmaking_queue.is_user_in_queue(user_id):
+        # User is still in queue, no match found
+        # Remove from queue
+        await matchmaking_queue.remove_user_from_queue(user_id)
+        
+        # Notify user
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            await bot.send_message(
+                telegram_id,
+                "❌ متأسفانه کسی رو برات پیدا نکردیم.\n\n"
+                "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
+            )
+            await bot.session.close()
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data == "chat:start_search")
@@ -1086,7 +1116,11 @@ async def search_again_after_chat_end(callback: CallbackQuery, state: FSMContext
         
         # Check if user is already in queue
         if await matchmaking_queue.is_user_in_queue(user_id):
-            await callback.answer("⏳ شما در صف هستید. لطفاً صبر کنید...", show_alert=True)
+            await callback.answer(
+                "⏳ در حال جستجو هستی عزیزم! 🔍\n\n"
+                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                show_alert=True
+            )
             return
         
         # Show gender selection keyboard

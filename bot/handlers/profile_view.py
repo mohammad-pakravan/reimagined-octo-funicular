@@ -18,6 +18,7 @@ from db.crud import (
 )
 from bot.keyboards.profile import get_profile_keyboard
 from bot.keyboards.reply import get_main_reply_keyboard
+from utils.validators import get_display_name
 
 router = Router()
 
@@ -83,7 +84,7 @@ async def view_user_profile(message: Message):
                 distance = "شهرهای مختلف"
         
         profile_text = (
-            f"• نام: {profile_user.username or 'تعیین نشده'}\n"
+            f"• نام: {get_display_name(profile_user)}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {profile_user.province or 'تعیین نشده'}\n"
             f"• شهر: {profile_user.city or 'تعیین نشده'}\n"
@@ -186,7 +187,7 @@ async def view_user_profile_regex(message: Message):
                 distance = "شهرهای مختلف"
         
         profile_text = (
-            f"• نام: {profile_user.username or 'تعیین نشده'}\n"
+            f"• نام: {get_display_name(profile_user)}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {profile_user.province or 'تعیین نشده'}\n"
             f"• شهر: {profile_user.city or 'تعیین نشده'}\n"

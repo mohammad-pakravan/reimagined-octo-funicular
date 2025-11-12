@@ -44,9 +44,10 @@ async def premium_info(callback: CallbackQuery):
                     f"✅ شما اشتراک پریمیوم فعال دارید!\n\n"
                     f"تاریخ انقضا: {expires_at}\n\n"
                     f"ویژگی‌های پریمیوم:\n"
-                    f"• تماس تصویری\n"
-                    f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه)\n"
-                    f"• فیلترهای پیشرفته",
+                    f"• تماس تصویری در وب اپ ( به زودی )\n"
+                    f"• ارتباط بدون مصرف سکه\n"
+                    f"• فیلترهای پیشرفته ( به زودی )\n"
+                    f"• اولویت در صف (نفر اول صف)",
                     reply_markup=get_main_menu_keyboard()
                 )
             except Exception:
@@ -56,9 +57,10 @@ async def premium_info(callback: CallbackQuery):
                     f"✅ شما اشتراک پریمیوم فعال دارید!\n\n"
                     f"تاریخ انقضا: {expires_at}\n\n"
                     f"ویژگی‌های پریمیوم:\n"
-                    f"• تماس تصویری\n"
-                    f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه)\n"
-                    f"• فیلترهای پیشرفته",
+                    f"• تماس تصویری در وب اپ ( به زودی )\n"
+                    f"• ارتباط بدون مصرف سکه\n"
+                    f"• فیلترهای پیشرفته ( به زودی )\n"
+                    f"• اولویت در صف (نفر اول صف)",
                     reply_markup=get_main_menu_keyboard()
                 )
         else:
@@ -70,10 +72,10 @@ async def premium_info(callback: CallbackQuery):
             
             if plans:
                 text = "💎 اشتراک پریمیوم\n\n"
-                text += "با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n"
-                text += "• تماس تصویری\n"
-                text += f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
-                text += "• فیلترهای پیشرفته\n"
+                text += "با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                text += "• تماس تصویری در وب اپ ( به زودی )\n"
+                text += "• ارتباط بدون مصرف سکه\n"
+                text += "• فیلترهای پیشرفته ( به زودی )\n"
                 text += "• اولویت در صف (نفر اول صف)\n\n"
                 text += "🎁 پلن‌های موجود:\n\n"
                 
@@ -109,10 +111,10 @@ async def premium_info(callback: CallbackQuery):
                 try:
                     await callback.message.edit_text(
                         f"💎 اشتراک پریمیوم\n\n"
-                        f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n"
-                        f"• تماس تصویری\n"
-                        f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
-                        f"• فیلترهای پیشرفته\n"
+                        f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                        f"• تماس تصویری در وب اپ ( به زودی )\n"
+                        f"• ارتباط بدون مصرف سکه\n"
+                        f"• فیلترهای پیشرفته ( به زودی )\n"
                         f"• اولویت در صف (نفر اول صف)\n\n"
                         f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
                         f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
@@ -122,10 +124,10 @@ async def premium_info(callback: CallbackQuery):
                 except Exception:
                     await callback.message.answer(
                         f"💎 اشتراک پریمیوم\n\n"
-                        f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n"
-                        f"• تماس تصویری\n"
-                        f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
-                        f"• فیلترهای پیشرفته\n"
+                        f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                        f"• تماس تصویری در وب اپ ( به زودی )\n"
+                        f"• ارتباط بدون مصرف سکه\n"
+                        f"• فیلترهای پیشرفته ( به زودی )\n"
                         f"• اولویت در صف (نفر اول صف)\n\n"
                         f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
                         f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
@@ -175,11 +177,19 @@ async def premium_buy(callback: CallbackQuery):
             )
             return
         
-        await callback.message.edit_text(
-            "💎 پلن‌های پریمیوم\n\n"
-            "یکی از پلن‌های زیر را انتخاب کنید:",
-            reply_markup=get_user_premium_plans_keyboard(plans)
-        )
+        try:
+            await callback.message.edit_text(
+                "💎 پلن‌های پریمیوم\n\n"
+                "یکی از پلن‌های زیر را انتخاب کنید:",
+                reply_markup=get_user_premium_plans_keyboard(plans)
+            )
+        except Exception:
+            # If edit fails (e.g., message not modified), send new message
+            await callback.message.answer(
+                "💎 پلن‌های پریمیوم\n\n"
+                "یکی از پلن‌های زیر را انتخاب کنید:",
+                reply_markup=get_user_premium_plans_keyboard(plans)
+            )
         
         await callback.answer()
         break
@@ -202,16 +212,21 @@ async def premium_purchase(callback: CallbackQuery):
         if is_premium:
             expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "هرگز"
             
-            await callback.message.edit_text(
-                f"💎 وضعیت پریمیوم\n\n"
-                f"✅ شما اشتراک پریمیوم فعال دارید!\n\n"
-                f"تاریخ انقضا: {expires_at}\n\n"
-                f"ویژگی‌های پریمیوم:\n"
-                f"• تماس تصویری\n"
-                f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه)\n"
-                f"• فیلترهای پیشرفته",
-                reply_markup=get_main_menu_keyboard()
-            )
+            try:
+                await callback.message.edit_text(
+                    f"💎 وضعیت پریمیوم\n\n"
+                    f"✅ شما اشتراک پریمیوم فعال دارید!\n\n"
+                    f"تاریخ انقضا: {expires_at}\n\n"
+                    f"ویژگی‌های پریمیوم:\n"
+                    f"• تماس تصویری در وب اپ ( به زودی )\n"
+                    f"• ارتباط بدون مصرف سکه\n"
+                    f"• فیلترهای پیشرفته ( به زودی )\n"
+                    f"• اولویت در صف (نفر اول صف)",
+                    reply_markup=get_main_menu_keyboard()
+                )
+            except Exception:
+                # If edit fails (e.g., message not modified), ignore
+                pass
         else:
             # Get premium plans from database
             from db.crud import get_visible_premium_plans
@@ -221,10 +236,10 @@ async def premium_purchase(callback: CallbackQuery):
             
             if plans:
                 text = "💎 اشتراک پریمیوم\n\n"
-                text += "با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n"
-                text += "• تماس تصویری\n"
-                text += f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
-                text += "• فیلترهای پیشرفته\n"
+                text += "با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                text += "• تماس تصویری در وب اپ ( به زودی )\n"
+                text += "• ارتباط بدون مصرف سکه\n"
+                text += "• فیلترهای پیشرفته ( به زودی )\n"
                 text += "• اولویت در صف (نفر اول صف)\n\n"
                 text += "🎁 پلن‌های موجود:\n\n"
                 
@@ -245,24 +260,46 @@ async def premium_purchase(callback: CallbackQuery):
                 
                 text += "پلن مورد نظر را انتخاب کنید:"
                 
-                await callback.message.edit_text(
-                    text,
-                    reply_markup=get_user_premium_plans_keyboard(plans)
-                )
+                try:
+                    await callback.message.edit_text(
+                        text,
+                        reply_markup=get_user_premium_plans_keyboard(plans)
+                    )
+                except Exception:
+                    # If edit fails (e.g., message not modified), send new message
+                    await callback.message.answer(
+                        text,
+                        reply_markup=get_user_premium_plans_keyboard(plans)
+                    )
             else:
                 # Fallback to default if no plans
-                await callback.message.edit_text(
-                    f"💎 اشتراک پریمیوم\n\n"
-                    f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n"
-                    f"• تماس تصویری\n"
-                    f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
-                    f"• فیلترهای پیشرفته\n"
-                    f"• اولویت در صف (نفر اول صف)\n\n"
-                    f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
-                    f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
-                    f"آیا می‌خواهید پریمیوم بخرید?",
-                    reply_markup=get_premium_keyboard()
-                )
+                try:
+                    await callback.message.edit_text(
+                        f"💎 اشتراک پریمیوم\n\n"
+                        f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                        f"• تماس تصویری در وب اپ ( به زودی )\n"
+                        f"• ارتباط بدون مصرف سکه\n"
+                        f"• فیلترهای پیشرفته ( به زودی )\n"
+                        f"• اولویت در صف (نفر اول صف)\n\n"
+                        f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
+                        f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
+                        f"آیا می‌خواهید پریمیوم بخرید?",
+                        reply_markup=get_premium_keyboard()
+                    )
+                except Exception:
+                    # If edit fails (e.g., message not modified), send new message
+                    await callback.message.answer(
+                        f"💎 اشتراک پریمیوم\n\n"
+                        f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
+                        f"• تماس تصویری در وب اپ ( به زودی )\n"
+                        f"• ارتباط بدون مصرف سکه\n"
+                        f"• فیلترهای پیشرفته ( به زودی )\n"
+                        f"• اولویت در صف (نفر اول صف)\n\n"
+                        f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
+                        f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
+                        f"آیا می‌خواهید پریمیوم بخرید?",
+                        reply_markup=get_premium_keyboard()
+                    )
         
         await callback.answer()
         break
@@ -413,10 +450,17 @@ async def premium_plan_purchase(callback: CallbackQuery):
         plan_info += discount_text
         plan_info += "\n\nروش پرداخت را انتخاب کنید:"
         
-        await callback.message.edit_text(
-            plan_info,
-            reply_markup=get_premium_plan_payment_keyboard(plan)
-        )
+        try:
+            await callback.message.edit_text(
+                plan_info,
+                reply_markup=get_premium_plan_payment_keyboard(plan)
+            )
+        except Exception:
+            # If edit fails (e.g., message not modified), send new message
+            await callback.message.answer(
+                plan_info,
+                reply_markup=get_premium_plan_payment_keyboard(plan)
+            )
         
         await callback.answer()
         break
@@ -586,15 +630,27 @@ async def process_shaparak_payment(
     except Exception:
         bot_username = "asdasdczaxcqeqwbot"  # Fallback to provided username
     
-    await callback.message.edit_text(
-        f"💳 پرداخت با زرین‌پال\n\n"
-        f"💎 پلن: {plan.plan_name}\n"
-        f"💰 مبلغ: {int(plan.price):,} تومان\n\n"
-        f"🔗 برای پرداخت روی لینک زیر کلیک کنید:\n\n"
-        f"{payment_link}\n\n"
-        f"💡 پس از پرداخت، می‌توانید از طریق لینک بازگشت به ربات برگردید.",
-        reply_markup=None
-    )
+    try:
+        await callback.message.edit_text(
+            f"💳 پرداخت با زرین‌پال\n\n"
+            f"💎 پلن: {plan.plan_name}\n"
+            f"💰 مبلغ: {int(plan.price):,} تومان\n\n"
+            f"🔗 برای پرداخت روی لینک زیر کلیک کنید:\n\n"
+            f"{payment_link}\n\n"
+            f"💡 پس از پرداخت، می‌توانید از طریق لینک بازگشت به ربات برگردید.",
+            reply_markup=None
+        )
+    except Exception:
+        # If edit fails (e.g., message not modified), send new message
+        await callback.message.answer(
+            f"💳 پرداخت با زرین‌پال\n\n"
+            f"💎 پلن: {plan.plan_name}\n"
+            f"💰 مبلغ: {int(plan.price):,} تومان\n\n"
+            f"🔗 برای پرداخت روی لینک زیر کلیک کنید:\n\n"
+            f"{payment_link}\n\n"
+            f"💡 پس از پرداخت، می‌توانید از طریق لینک بازگشت به ربات برگردید.",
+            reply_markup=None
+        )
     
     await callback.answer("✅ لینک پرداخت برای شما نمایش داده شد.", show_alert=True)
 
@@ -682,7 +738,9 @@ async def successful_payment_handler(message: Message):
 @router.callback_query(F.data == "premium:features")
 async def premium_features(callback: CallbackQuery):
     """Show premium features list."""
-    await callback.message.edit_text(
+    from bot.keyboards.common import get_premium_keyboard
+    
+    features_text = (
         f"💎 Premium Features\n\n"
         f"1. Video Calls\n"
         f"   • Start video calls with your chat partner\n"
@@ -698,8 +756,19 @@ async def premium_features(callback: CallbackQuery):
         f"   • Get matched faster\n"
         f"   • Higher priority in queue\n\n"
         f"Price: {settings.PREMIUM_PRICE} Toman\n"
-        f"Duration: {settings.PREMIUM_DURATION_DAYS} days",
-        reply_markup=get_premium_keyboard()
+        f"Duration: {settings.PREMIUM_DURATION_DAYS} days"
     )
+    
+    try:
+        await callback.message.edit_text(
+            features_text,
+            reply_markup=get_premium_keyboard()
+        )
+    except Exception:
+        # If edit fails (e.g., message not modified), send new message
+        await callback.message.answer(
+            features_text,
+            reply_markup=get_premium_keyboard()
+        )
     await callback.answer()
 

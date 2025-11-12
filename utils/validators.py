@@ -102,6 +102,24 @@ def validate_username(username: str) -> tuple[bool, str]:
     return True, ""
 
 
+def get_display_name(user) -> str:
+    """
+    Get display name for a user, falling back to username if display_name is not set.
+    
+    Args:
+        user: User object with display_name and username attributes
+        
+    Returns:
+        str: Display name or username or 'نامشخص'
+    """
+    if hasattr(user, 'display_name') and user.display_name:
+        return user.display_name
+    elif hasattr(user, 'username') and user.username:
+        return user.username
+    else:
+        return 'نامشخص'
+
+
 def parse_age(text: str) -> tuple[bool, int, str]:
     """
     Parse age from text input.

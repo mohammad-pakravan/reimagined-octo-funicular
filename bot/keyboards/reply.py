@@ -11,12 +11,24 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     """Get main reply keyboard."""
     keyboard = ReplyKeyboardBuilder()
     
+    # Row 1: Start Chat
     keyboard.add(KeyboardButton(text="💬 شروع چت"))
-    keyboard.add(KeyboardButton(text="📊 پروفایل من"))
+    
+    # Row 2: Premium, Free Coins
     keyboard.add(KeyboardButton(text="💎 پریمیوم"))
+    keyboard.add(KeyboardButton(text="💰 سکه ی رایگان"))
+    
+    # Row 3: Rewards and Engagement
     keyboard.add(KeyboardButton(text="🎁 پاداش‌ها و تعامل"))
     
-    keyboard.adjust(1, 2, 1)
+    # Row 4: Help, My Profile
+    keyboard.add(KeyboardButton(text="📖 راهنما"))
+    keyboard.add(KeyboardButton(text="📊 پروفایل من"))
+    
+    # Row 5: Invite Friends
+    keyboard.add(KeyboardButton(text="👥 دعوت دوستان( سکه رایگان )"))
+    
+    keyboard.adjust(1, 2, 1, 2, 1)
     return keyboard.as_markup(resize_keyboard=True, persistent=True)
 
 
@@ -32,9 +44,9 @@ def get_chat_reply_keyboard(private_mode: bool = False) -> ReplyKeyboardMarkup:
     keyboard.add(KeyboardButton(text="👤 پروفایل مخاطب"))
     # Update button text based on private mode status
     if private_mode:
-        keyboard.add(KeyboardButton(text="🔓 غیرفعال کردن حالت خصوصی"))
+        keyboard.add(KeyboardButton(text="🟢 حالت خصوصی"))
     else:
-        keyboard.add(KeyboardButton(text="🔒 فعال کردن حالت خصوصی"))
+        keyboard.add(KeyboardButton(text="⚪ حالت خصوصی"))
     keyboard.add(KeyboardButton(text="❌ قطع مکالمه"))
     
     keyboard.adjust(2, 1)

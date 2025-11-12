@@ -83,6 +83,17 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
     receiver_id = int(callback.data.split(":")[-1])
     user_id = callback.from_user.id
     
+    # Get state data
+    state_data = await state.get_data()
+    
+    # If this is a reply, dm_list handler should have processed it (it has IsReplyFilter)
+    # So if we reach here, it's a new message, not a reply
+    # But we should clear any leftover reply state
+    reply_to_sender_id = state_data.get("dm_reply_to_sender_id")
+    if reply_to_sender_id:
+        # Clear reply state if it exists (user was in reply mode but now sending new message)
+        await state.update_data(dm_reply_to_sender_id=None)
+    
     async for db_session in get_db():
         user = await get_user_by_telegram_id(db_session, user_id)
         if not user:
@@ -97,7 +108,6 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             return
         
         # Get message text from state
-        state_data = await state.get_data()
         message_text = state_data.get("dm_message_text")
         
         if not message_text:
@@ -130,10 +140,11 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             # Get user profile ID
             user_profile_id = f"/user_{user.profile_id}"
             
+            from utils.validators import get_display_name
             await bot.send_message(
                 receiver.telegram_id,
-                f"✉️ یک پیام دایرکت از {user.username or 'یک کاربر'} داری!\n\n"
-                f"👤 نام: {user.username or 'نامشخص'}\n"
+                f"✉️ یک پیام دایرکت از {get_display_name(user)} داری!\n\n"
+                f"👤 نام: {get_display_name(user)}\n"
                 f"⚧️ جنسیت: {gender_text}\n"
                 f"🆔 ID: {user_profile_id}\n\n"
                 f"برای مشاهده پیام از دکمه زیر استفاده کن:",
@@ -247,9 +258,10 @@ async def view_direct_message(callback: CallbackQuery):
         # Get keyboard with delete and block options
         view_keyboard = get_dm_view_keyboard(dm_id, dm.sender_id)
         
+        from utils.validators import get_display_name
         await callback.message.edit_text(
             f"✉️ پیام دایرکت\n\n"
-            f"👤 از: {sender.username or 'نامشخص'}\n"
+            f"👤 از: {get_display_name(sender)}\n"
             f"⚧️ جنسیت: {gender_text}\n"
             f"🆔 ID: {sender_profile_id}\n"
             f"📅 تاریخ: {dm.created_at.strftime('%Y-%m-%d %H:%M')}\n\n"
@@ -347,13 +359,49 @@ async def block_sender_from_dm_handler(callback: CallbackQuery):
         success = await block_user(db_session, user.id, sender_id)
         
         if success:
+            from utils.validators import get_display_name
             await callback.message.edit_text(
-                f"🚫 {sender.username or 'کاربر'} بلاک شد.\n\n"
+                f"🚫 {get_display_name(sender)} بلاک شد.\n\n"
                 "این کاربر دیگر نمی‌تواند برای شما پیام دایرکت بفرستد.",
                 reply_markup=None
             )
-            await callback.answer(f"🚫 {sender.username or 'کاربر'} بلاک شد")
+            await callback.answer(f"🚫 {get_display_name(sender)} بلاک شد")
         else:
             await callback.answer("❌ خطا در بلاک کردن.", show_alert=True)
+        break
+
+
+@router.callback_query(F.data.startswith("dm:reply_from_view:"))
+async def reply_to_direct_message_from_view(callback: CallbackQuery, state: FSMContext):
+    """Start replying to direct message from view page - set FSM state."""
+    sender_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        sender = await get_user_by_id(db_session, sender_id)
+        if not sender:
+            await callback.answer("❌ فرستنده یافت نشد.", show_alert=True)
+            return
+        
+        # Check if sender has blocked the user
+        if await is_blocked(db_session, sender.id, user.id):
+            await callback.answer("❌ این کاربر شما را بلاک کرده است و نمی‌توانید به او پیام بفرستید.", show_alert=True)
+            return
+        
+        # Set FSM state to wait for reply message
+        await state.update_data(dm_reply_to_sender_id=sender_id)
+        await state.set_state("dm:waiting_reply")
+        
+        from utils.validators import get_display_name
+        await callback.message.answer(
+            f"✉️ پاسخ به {get_display_name(sender)}\n\n"
+            "لطفاً متن پاسخ خود را بنویسید:"
+        )
+        await callback.answer()
         break
 

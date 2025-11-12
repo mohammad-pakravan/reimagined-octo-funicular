@@ -18,6 +18,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
     username = Column(String(255), nullable=True)
+    display_name = Column(String(255), nullable=True)  # نام نمایشی کاربر
     
     # Profile information
     gender = Column(String(20), nullable=True)  # 'male', 'female', 'other'

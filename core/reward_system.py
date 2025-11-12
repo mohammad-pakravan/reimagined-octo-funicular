@@ -58,43 +58,34 @@ class RewardSystem:
     @staticmethod
     async def calculate_reward_points(streak_count: int) -> int:
         """
-        Calculate reward points based on streak.
+        Calculate reward points (only base coins from admin, no streak bonus).
+        Streak bonus is removed - only base coins are given.
+        Event multipliers are applied separately in EventEngine.
         
         Args:
-            streak_count: Current streak count
+            streak_count: Current streak count (kept for tracking, but not used for bonus)
             
         Returns:
-            Points to award
+            Points to award (base coins only)
         """
-        # Get base points from database
+        # Get base points from database (set by admin)
         async for db_session in get_db():
             base_coins = await get_coins_for_activity(db_session, "daily_login")
             if base_coins is None:
                 base_coins = settings.DAILY_REWARD_BASE_POINTS  # Fallback to settings
             break
         
-        base_points = base_coins
-        
-        # Calculate streak bonus (capped at MAX_DAILY_REWARD_STREAK)
-        effective_streak = min(streak_count, settings.MAX_DAILY_REWARD_STREAK)
-        streak_bonus = effective_streak * settings.DAILY_REWARD_STREAK_BONUS
-        
-        # Apply streak multiplier if streak is high
-        if streak_count >= settings.MAX_DAILY_REWARD_STREAK:
-            multiplier = settings.POINTS_STREAK_MULTIPLIER
-            total_points = int((base_points + streak_bonus) * multiplier)
-        else:
-            total_points = base_points + streak_bonus
-        
-        return total_points
+        # Return only base coins (no streak bonus)
+        return base_coins
     
     @staticmethod
-    async def claim_daily_reward(user_id: int) -> Optional[dict]:
+    async def claim_daily_reward(user_id: int, telegram_id: Optional[int] = None) -> Optional[dict]:
         """
         Claim daily reward for user.
         
         Args:
             user_id: User ID
+            telegram_id: Optional Telegram ID to check if this telegram_id has claimed today (prevents abuse)
             
         Returns:
             Dictionary with reward info or None if already claimed today
@@ -106,6 +97,29 @@ class RewardSystem:
         """
         async for db_session in get_db():
             today = date.today()
+            
+            # Import here to avoid circular dependency
+            from db.crud import check_telegram_id_claimed_daily_reward, get_daily_reward
+            from sqlalchemy import select
+            from db.models import DailyReward, User
+            
+            # Check if telegram_id has claimed today (prevent abuse after account deletion)
+            if telegram_id:
+                if await check_telegram_id_claimed_daily_reward(db_session, telegram_id, today):
+                    # Find any daily reward for this telegram_id today
+                    result = await db_session.execute(
+                        select(DailyReward)
+                        .join(User, DailyReward.user_id == User.id)
+                        .where(User.telegram_id == telegram_id)
+                        .where(DailyReward.reward_date == today)
+                    )
+                    existing_reward = result.scalar_one_or_none()
+                    if existing_reward:
+                        return {
+                            'points': existing_reward.points_rewarded,
+                            'streak_count': existing_reward.streak_count,
+                            'already_claimed': True
+                        }
             
             # Check if already claimed today
             today_reward = await get_daily_reward(db_session, user_id, today)

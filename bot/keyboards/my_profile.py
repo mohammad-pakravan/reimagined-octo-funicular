@@ -32,6 +32,9 @@ def get_my_profile_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✉️ پیام‌های دایرکت", callback_data="my_profile:direct_messages"),
         ],
         [
+            InlineKeyboardButton(text="🗑️ حذف اکانت", callback_data="my_profile:delete_account"),
+        ],
+        [
             InlineKeyboardButton(text="🔙 بازگشت", callback_data="my_profile:back"),
         ],
     ])
@@ -202,6 +205,10 @@ def get_direct_messages_list_keyboard(message_list: list, page: int = 0, page_si
             InlineKeyboardButton(
                 text=button_text,
                 callback_data=f"dm_list:view:{sender_id}"
+            ),
+            InlineKeyboardButton(
+                text="🗑️",
+                callback_data=f"dm_list:delete_conversation:{sender_id}"
             )
         ])
     

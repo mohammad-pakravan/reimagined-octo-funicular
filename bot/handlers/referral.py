@@ -43,7 +43,11 @@ async def referral_info(callback: CallbackQuery):
         from db.crud import get_coins_for_activity
         coins_profile_complete = await get_coins_for_activity(db_session, "referral_profile_complete")
         if coins_profile_complete is None:
-            coins_profile_complete = settings.POINTS_REFERRAL_REFERRER  # Fallback to settings
+            # Try fallback to old referral_referrer
+            coins_profile_complete = await get_coins_for_activity(db_session, "referral_referrer")
+            if coins_profile_complete is None:
+                # No fallback - admin must set this in database
+                coins_profile_complete = 0
         
         # Get bot username
         try:
@@ -58,9 +62,9 @@ async def referral_info(callback: CallbackQuery):
         # Only count profile completion rewards
         total_points = referral_count * coins_profile_complete
         
-        text = (
+        # First message: Statistics and instructions
+        stats_text = (
             f"👥 دعوت دوستان\n\n"
-            f"🔗 لینک عضویت شما:\n{referral_link}\n\n"
             f"📊 آمار:\n"
             f"• تعداد دعوت‌ها: {referral_count}\n"
             f"• کل سکه کسب شده: {total_points}\n\n"
@@ -69,18 +73,55 @@ async def referral_info(callback: CallbackQuery):
         )
         
         if not is_premium:
-            text += (
+            stats_text += (
                 f"💎 با خرید پریمیوم:\n"
                 f"• پاداش بیشتر برای دعوت‌ها\n"
                 f"• اولویت در صف\n"
                 f"• امکانات بیشتر\n\n"
             )
         
-        text += "💡 این لینک را با دوستان خود به اشتراک بگذار!"
+        stats_text += "💡 لینک دعوت را از پیام بعدی کپی کنید و با دوستان خود به اشتراک بگذارید!"
         
-        await callback.message.edit_text(
-            text,
-            reply_markup=get_referral_menu_keyboard()
+        try:
+            await callback.message.edit_text(
+                stats_text,
+                reply_markup=get_referral_menu_keyboard()
+            )
+        except Exception:
+            # If edit fails, send new message
+            await callback.message.answer(
+                stats_text,
+                reply_markup=get_referral_menu_keyboard()
+            )
+        
+        # Second message: Forwardable referral link message
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        forward_text = (
+            f"🎉 به ربات چت ناشناس خوش آمدید!\n\n"
+            f"💬 با این ربات می‌توانید:\n"
+            f"• با کاربران دیگر چت کنید\n"
+            f"• دوستان جدید پیدا کنید\n"
+            f"• سکه رایگان دریافت کنید\n\n"
+            f"🔗 برای عضویت روی لینک زیر کلیک کنید:\n"
+            f"{referral_link}\n\n"
+            f"🎁 با عضویت از طریق این لینک، هر دو نفر سکه رایگان دریافت می‌کنید!"
+        )
+        
+        # Create keyboard with share button
+        share_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔗 عضویت در ربات",
+                    url=referral_link
+                )
+            ]
+          
+        ])
+        
+        await callback.message.answer(
+            forward_text,
+            reply_markup=share_keyboard
         )
         await callback.answer()
         break
@@ -109,7 +150,11 @@ async def referral_stats(callback: CallbackQuery):
         from db.crud import get_coins_for_activity
         coins_profile_complete = await get_coins_for_activity(db_session, "referral_profile_complete")
         if coins_profile_complete is None:
-            coins_profile_complete = settings.POINTS_REFERRAL_REFERRER  # Fallback to settings
+            # Try fallback to old referral_referrer
+            coins_profile_complete = await get_coins_for_activity(db_session, "referral_referrer")
+            if coins_profile_complete is None:
+                # No fallback - admin must set this in database
+                coins_profile_complete = 0
         
         # Calculate total points (approximate, as we don't know how many completed profile)
         # Only count profile completion rewards

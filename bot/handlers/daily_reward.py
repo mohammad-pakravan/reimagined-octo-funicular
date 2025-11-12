@@ -109,7 +109,8 @@ async def claim_daily_reward(callback: CallbackQuery):
             await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
             return
         
-        reward_info = await RewardSystem.claim_daily_reward(user.id)
+        # Pass telegram_id to prevent abuse after account deletion
+        reward_info = await RewardSystem.claim_daily_reward(user.id, telegram_id=user_id)
         
         if not reward_info:
             await callback.answer("❌ خطا در دریافت پاداش.", show_alert=True)
@@ -156,7 +157,6 @@ async def claim_daily_reward(callback: CallbackQuery):
         
         # Get event info if multiplier was applied
         event_info = ""
-        streak_multiplier_info = ""
         if final_points > base_points:
             from db.crud import get_active_events
             events = await get_active_events(db_session, event_type="points_multiplier")
@@ -167,17 +167,6 @@ async def claim_daily_reward(callback: CallbackQuery):
                 if not apply_to_sources or "daily_login" in apply_to_sources:
                     multiplier = config.get("multiplier", 1.0)
                     event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {base_points} → سکه نهایی: {final_points}"
-                    
-                    # Calculate streak multiplier message
-                    if reward_info['streak_count'] > 1:
-                        if multiplier == 2.0:
-                            streak_multiplier_info = "\n🔥 استریک دو برابر سکه داد!"
-                        elif multiplier == 3.0:
-                            streak_multiplier_info = "\n🔥 استریک سه برابر سکه داد!"
-                        elif multiplier > 3.0:
-                            streak_multiplier_info = f"\n🔥 استریک {int(multiplier)} برابر سکه داد!"
-                        else:
-                            streak_multiplier_info = f"\n🔥 به خاطر ایونت، استریک {multiplier}x سکه بیشتر داد!"
         
         if reward_info.get('already_claimed'):
             # For already claimed, get the actual points from database
@@ -199,22 +188,12 @@ async def claim_daily_reward(callback: CallbackQuery):
                         if not apply_to_sources or "daily_login" in apply_to_sources:
                             multiplier = config.get("multiplier", 1.0)
                             event_info = f"\n\n🎁 به خاطر ایونت «{event.event_name}» ضریب {multiplier}x اعمال شد!\n✨ سکه پایه: {base_claimed} → سکه نهایی: {final_claimed}"
-                            
-                            if reward_info['streak_count'] > 1:
-                                if multiplier == 2.0:
-                                    streak_multiplier_info = "\n🔥 استریک دو برابر سکه داد!"
-                                elif multiplier == 3.0:
-                                    streak_multiplier_info = "\n🔥 استریک سه برابر سکه داد!"
-                                elif multiplier > 3.0:
-                                    streak_multiplier_info = f"\n🔥 استریک {int(multiplier)} برابر سکه داد!"
-                                else:
-                                    streak_multiplier_info = f"\n🔥 به خاطر ایونت، استریک {multiplier}x سکه بیشتر داد!"
                 
                 await callback.message.edit_text(
                     f"🎁 پاداش روزانه\n\n"
                     f"✅ شما امروز پاداش خود را دریافت کرده‌اید!\n\n"
                     f"💰 سکه دریافت شده: {final_claimed}{event_info}\n"
-                    f"🔥 استریک: {reward_info['streak_count']} روز{streak_multiplier_info}\n\n"
+                    f"🔥 سکه ی روزانه: {reward_info['streak_count']} روز\n\n"
                     f"فردا دوباره بیا!",
                     reply_markup=get_daily_reward_keyboard(already_claimed=True)
                 )
@@ -223,21 +202,19 @@ async def claim_daily_reward(callback: CallbackQuery):
                     f"🎁 پاداش روزانه\n\n"
                     f"✅ شما امروز پاداش خود را دریافت کرده‌اید!\n\n"
                     f"💰 سکه دریافت شده: {final_points}{event_info}\n"
-                    f"🔥 استریک: {reward_info['streak_count']} روز{streak_multiplier_info}\n\n"
+                    f"🔥 سکه ی روزانه: {reward_info['streak_count']} روز\n\n"
                     f"فردا دوباره بیا!",
                     reply_markup=get_daily_reward_keyboard(already_claimed=True)
                 )
         else:
             streak_text = ""
             if reward_info['streak_count'] > 1:
-                streak_text = f"\n🔥 استریک: {reward_info['streak_count']} روز!"
-                if streak_multiplier_info:
-                    streak_text += streak_multiplier_info
+                streak_text = f"\n🔥 سکه ی روزانه: {reward_info['streak_count']} روز"
             
             await callback.message.edit_text(
                 f"🎁 پاداش روزانه دریافت شد!\n\n"
                 f"💰 سکه دریافت شده: {final_points}{event_info}{streak_text}\n\n"
-                f"فردا دوباره بیا تا استریکت را ادامه بدهی!",
+                f"فردا دوباره بیا تا سکه ی روزانه‌ات را ادامه بدهی!",
                 reply_markup=get_daily_reward_keyboard(already_claimed=False)
             )
         
@@ -260,9 +237,9 @@ async def show_streak_info(callback: CallbackQuery):
         
         streak_text = ""
         if streak_info.get('streak_count', 0) > 0:
-            streak_text = f"\n🔥 استریک فعلی: {streak_info['streak_count']} روز"
+            streak_text = f"\n🔥 سکه ی روزانه فعلی: {streak_info['streak_count']} روز"
         else:
-            streak_text = "\n⚠️ استریک فعلی: 0 روز (شروع کن!)"
+            streak_text = "\n⚠️ سکه ی روزانه فعلی: 0 روز (شروع کن!)"
         
         last_reward_text = ""
         if streak_info.get('last_reward_date'):
@@ -273,7 +250,7 @@ async def show_streak_info(callback: CallbackQuery):
         can_claim_text = ""
         if streak_info.get('can_claim_today'):
             if streak_info.get('next_streak'):
-                can_claim_text = f"\n✅ می‌توانی امروز پاداش بگیری! (استریک بعدی: {streak_info['next_streak']} روز)"
+                can_claim_text = f"\n✅ می‌توانی امروز پاداش بگیری! (سکه ی روزانه بعدی: {streak_info['next_streak']} روز)"
             else:
                 can_claim_text = "\n✅ می‌توانی امروز پاداش بگیری!"
         else:
@@ -282,9 +259,9 @@ async def show_streak_info(callback: CallbackQuery):
         
         try:
             await callback.message.edit_text(
-                f"📊 وضعیت استریک\n\n"
+                f"📊 وضعیت سکه ی روزانه\n\n"
                 f"{streak_text}{last_reward_text}{can_claim_text}\n\n"
-                f"هر روز که پاداش بگیری، استریکت بیشتر می‌شه و پاداش بیشتری دریافت می‌کنی!",
+                f"هر روز که پاداش بگیری، سکه ی روزانه‌ات بیشتر می‌شه و پاداش بیشتری دریافت می‌کنی!",
                 reply_markup=get_daily_reward_keyboard(already_claimed=not streak_info.get('can_claim_today', False))
             )
         except Exception:

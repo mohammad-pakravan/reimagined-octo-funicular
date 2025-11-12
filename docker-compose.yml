@@ -38,6 +38,7 @@ services:
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin:latest
+#    image: linuxserver/phpmyadmin:latest
     container_name: telecaht_phpmyadmin
     ports:
       - "8080:80"

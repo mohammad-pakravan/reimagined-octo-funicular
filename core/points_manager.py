@@ -329,15 +329,23 @@ class PointsManager:
         Returns:
             True if successful
         """
-        # Get coins from database
+        # Get coins from database (must be set by admin)
         async for db_session in get_db():
             coins_referrer_base = await get_coins_for_activity(db_session, "referral_signup")
             if coins_referrer_base is None:
-                coins_referrer_base = settings.POINTS_REFERRAL_REFERRER  # Fallback to settings
+                # No fallback - admin must set this in database
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"referral_signup coins not set in database, using 0")
+                coins_referrer_base = 0
             
             coins_referred_base = await get_coins_for_activity(db_session, "referral_referred_signup")
             if coins_referred_base is None:
-                coins_referred_base = settings.POINTS_REFERRAL_REFERRED  # Fallback to settings
+                # No fallback - admin must set this in database
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"referral_referred_signup coins not set in database, using 0")
+                coins_referred_base = 0
             break
         
         # Calculate actual coins with multiplier for display
@@ -451,21 +459,29 @@ class PointsManager:
         Returns:
             True if successful
         """
-        # Get coins from database
+        # Get coins from database (must be set by admin)
         async for db_session in get_db():
             coins_referrer = await get_coins_for_activity(db_session, "referral_profile_complete")
             if coins_referrer is None:
-                # Fallback: use old referral_referrer setting or default
+                # Fallback: try old referral_referrer setting
                 coins_referrer = await get_coins_for_activity(db_session, "referral_referrer")
                 if coins_referrer is None:
-                    coins_referrer = settings.POINTS_REFERRAL_REFERRER
+                    # No fallback - admin must set this in database
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"referral_profile_complete coins not set in database, using 0")
+                    coins_referrer = 0
             
             # Get coins for referred user (use referral_referred_signup or referral_referred)
             coins_referred = await get_coins_for_activity(db_session, "referral_referred_signup")
             if coins_referred is None:
                 coins_referred = await get_coins_for_activity(db_session, "referral_referred")
                 if coins_referred is None:
-                    coins_referred = settings.POINTS_REFERRAL_REFERRED
+                    # No fallback - admin must set this in database
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"referral_referred_signup/referral_referred coins not set in database, using 0")
+                    coins_referred = 0
             break
         
         # Check for event referral reward first (premium days)
@@ -513,15 +529,23 @@ class PointsManager:
         Returns:
             True if successful
         """
-        # Get coins from database
+        # Get coins from database (must be set by admin)
         async for db_session in get_db():
             coins_referrer = await get_coins_for_activity(db_session, "referral_referrer")
             if coins_referrer is None:
-                coins_referrer = settings.POINTS_REFERRAL_REFERRER  # Fallback to settings
+                # No fallback - admin must set this in database
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"referral_referrer coins not set in database, using 0")
+                coins_referrer = 0
             
             coins_referred = await get_coins_for_activity(db_session, "referral_referred")
             if coins_referred is None:
-                coins_referred = settings.POINTS_REFERRAL_REFERRED  # Fallback to settings
+                # No fallback - admin must set this in database
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"referral_referred coins not set in database, using 0")
+                coins_referred = 0
             break
         
         # Check for event referral reward first (premium days)

@@ -2,6 +2,7 @@
 Chat request handlers.
 Handles sending, accepting, and rejecting chat requests.
 """
+import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
@@ -14,7 +15,7 @@ from db.crud import (
     get_user_by_id,
     get_active_chat_room_by_user,
 )
-from bot.keyboards.common import get_chat_request_keyboard
+from bot.keyboards.common import get_chat_request_keyboard, get_chat_request_cancel_keyboard
 from bot.keyboards.reply import get_chat_reply_keyboard
 from core.chat_manager import ChatManager
 from config.settings import settings
@@ -22,6 +23,43 @@ from config.settings import settings
 router = Router()
 
 chat_manager = None
+redis_client = None
+
+
+def set_redis_client(client):
+    """Set Redis client for tracking pending chat requests."""
+    global redis_client
+    redis_client = client
+
+
+def _get_pending_request_key(requester_id: int, receiver_id: int) -> str:
+    """Get Redis key for pending chat request."""
+    return f"chat_request:pending:{requester_id}:{receiver_id}"
+
+
+async def has_pending_chat_request(requester_id: int, receiver_id: int) -> bool:
+    """Check if user has a pending chat request to receiver."""
+    if not redis_client:
+        return False
+    key = _get_pending_request_key(requester_id, receiver_id)
+    exists = await redis_client.exists(key)
+    return bool(exists)
+
+
+async def set_pending_chat_request(requester_id: int, receiver_id: int):
+    """Set pending chat request in Redis (expires after 2 minutes)."""
+    if not redis_client:
+        return
+    key = _get_pending_request_key(requester_id, receiver_id)
+    await redis_client.setex(key, 120, "1")  # 2 minutes TTL
+
+
+async def remove_pending_chat_request(requester_id: int, receiver_id: int):
+    """Remove pending chat request from Redis."""
+    if not redis_client:
+        return
+    key = _get_pending_request_key(requester_id, receiver_id)
+    await redis_client.delete(key)
 
 
 def set_chat_manager(manager: ChatManager):
@@ -83,8 +121,9 @@ async def process_chat_request_message(message: Message, state: FSMContext):
             user_profile_id = f"/user_{user.profile_id}"
             
             # Build profile info text
+            from utils.validators import get_display_name
             profile_info = f"💬 درخواست چت جدید!\n\n"
-            profile_info += f"👤 از: {user.username or 'نامشخص'}\n"
+            profile_info += f"👤 از: {get_display_name(user)}\n"
             profile_info += f"⚧️ جنسیت: {gender_text}\n"
             
             if user.age:
@@ -131,11 +170,67 @@ async def process_chat_request_message(message: Message, state: FSMContext):
             await state.clear()
             break
         
+        # Send confirmation message to requester with cancel button
+        cancel_keyboard = get_chat_request_cancel_keyboard(user.id, receiver.id)
         await message.answer(
             f"✅ درخواست چت شما برای {receiver.username or 'کاربر'} ارسال شد.\n\n"
-            "منتظر پاسخ باشید..."
+            "⏳ منتظر پاسخ باشید...\n\n"
+            "💡 می‌تونی درخواست رو لغو کنی:",
+            reply_markup=cancel_keyboard
         )
         await state.clear()
+        
+        # Set pending request in Redis
+        await set_pending_chat_request(user.id, receiver.id)
+        
+        # Create timeout task - if no response after 2 minutes, notify requester
+        asyncio.create_task(check_chat_request_timeout(user.id, user.telegram_id, receiver.id, receiver.telegram_id))
+        
+        break
+
+
+async def check_chat_request_timeout(requester_id: int, requester_telegram_id: int, receiver_id: int, receiver_telegram_id: int):
+    """Check if chat request was responded to after 2 minutes and notify if not."""
+    await asyncio.sleep(120)  # Wait 2 minutes
+    
+    # First check if pending request still exists in Redis
+    # If it doesn't exist, it means it was already accepted/rejected
+    if not await has_pending_chat_request(requester_id, receiver_id):
+        # Request was already handled (accepted/rejected), no need to notify
+        return
+    
+    # Check if requester or receiver have active chat together
+    async for db_session in get_db():
+        if chat_manager:
+            # Check if they have active chat
+            requester_chat = await get_active_chat_room_by_user(db_session, requester_id)
+            if requester_chat:
+                # Check if the chat is with the receiver
+                if requester_chat.user1_id == receiver_id or requester_chat.user2_id == receiver_id:
+                    # Chat was accepted, remove pending request and no need to notify
+                    await remove_pending_chat_request(requester_id, receiver_id)
+                    break
+            
+            # No active chat and pending request still exists, request was not responded to
+            # Remove pending request from Redis
+            await remove_pending_chat_request(requester_id, receiver_id)
+            
+            # Notify requester
+            bot = Bot(token=settings.BOT_TOKEN)
+            try:
+                from db.crud import get_user_by_id
+                receiver = await get_user_by_id(db_session, receiver_id)
+                receiver_name = receiver.username if receiver else "کاربر"
+                
+                await bot.send_message(
+                    requester_telegram_id,
+                    f"⏰ متأسفانه {receiver_name or 'کاربر'} به درخواست چت شما پاسخ نداد.\n\n"
+                    "💡 مثل اینکه کاربر آفلاین است یا درخواست را ندیده است.\n"
+                    "می‌تونی دوباره امتحان کنی یا با کاربران دیگر چت کنی."
+                )
+                await bot.session.close()
+            except Exception:
+                pass
         break
 
 
@@ -253,6 +348,9 @@ async def accept_chat_request(callback: CallbackQuery):
                     logger = logging.getLogger(__name__)
                     logger.warning(f"Chat created but notification failed: {notification_errors}")
                 
+                # Remove pending request from Redis
+                await remove_pending_chat_request(requester.id, user.id)
+                
                 # Remove keyboard from message (if possible)
                 try:
                     await callback.message.edit_reply_markup(reply_markup=None)
@@ -293,13 +391,17 @@ async def reject_chat_request(callback: CallbackQuery):
         # Notify requester (optional)
         bot = Bot(token=settings.BOT_TOKEN)
         try:
+            from utils.validators import get_display_name
             await bot.send_message(
                 requester.telegram_id,
-                f"❌ درخواست چت شما توسط {user.username or 'کاربر'} رد شد."
+                f"❌ درخواست چت شما توسط {get_display_name(user)} رد شد."
             )
             await bot.session.close()
         except Exception:
             pass
+        
+        # Remove pending request from Redis
+        await remove_pending_chat_request(requester.id, user.id)
         
         # Remove keyboard from message (if possible)
         try:
@@ -309,6 +411,60 @@ async def reject_chat_request(callback: CallbackQuery):
         
         # Show popup notification
         await callback.answer("❌ درخواست چت رد شد", show_alert=True)
+        break
+
+
+@router.callback_query(F.data.startswith("chat_request:cancel:"))
+async def cancel_chat_request(callback: CallbackQuery):
+    """Cancel chat request by requester."""
+    receiver_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        receiver = await get_user_by_id(db_session, receiver_id)
+        if not receiver:
+            await callback.answer("❌ گیرنده یافت نشد.", show_alert=True)
+            return
+        
+        # Check if pending request exists
+        if not await has_pending_chat_request(user.id, receiver_id):
+            await callback.answer("❌ درخواست چت یافت نشد یا قبلاً لغو شده است.", show_alert=True)
+            return
+        
+        # Remove pending request from Redis
+        await remove_pending_chat_request(user.id, receiver_id)
+        
+        # Notify receiver (optional - can be removed if not needed)
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            from utils.validators import get_display_name
+            await bot.send_message(
+                receiver.telegram_id,
+                f"ℹ️ {get_display_name(user)} درخواست چت خود را لغو کرد."
+            )
+            await bot.session.close()
+        except Exception:
+            pass
+        
+        # Update requester's message
+        try:
+            await callback.message.edit_text(
+                "❌ درخواست چت لغو شد.\n\n"
+                f"درخواست چت شما برای {receiver.username or 'کاربر'} لغو شد.",
+                reply_markup=None
+            )
+        except Exception:
+            await callback.message.answer(
+                "❌ درخواست چت لغو شد.\n\n"
+                f"درخواست چت شما برای {receiver.username or 'کاربر'} لغو شد."
+            )
+        
+        await callback.answer("✅ درخواست چت لغو شد")
         break
 
 
@@ -338,9 +494,10 @@ async def block_from_chat_request(callback: CallbackQuery):
             # Notify requester (optional)
             bot = Bot(token=settings.BOT_TOKEN)
             try:
+                from utils.validators import get_display_name
                 await bot.send_message(
                     requester.telegram_id,
-                    f"🚫 شما توسط {user.username or 'کاربر'} بلاک شدید."
+                    f"🚫 شما توسط {get_display_name(user)} بلاک شدید."
                 )
                 await bot.session.close()
             except Exception:

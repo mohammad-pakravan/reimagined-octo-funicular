@@ -5,8 +5,9 @@ Handles viewing direct messages from specific senders and replying.
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import StateFilter
+from aiogram.filters import StateFilter, BaseFilter
 from aiogram.enums import ContentType
+from typing import Any
 
 from db.database import get_db
 from db.crud import (
@@ -17,12 +18,32 @@ from db.crud import (
     mark_direct_message_read,
     create_direct_message,
     is_blocked,
+    delete_conversation,
 )
 from bot.keyboards.my_profile import get_direct_messages_list_keyboard
-from bot.keyboards.common import get_dm_reply_keyboard, get_dm_confirm_keyboard
+from bot.keyboards.common import get_dm_reply_keyboard, get_dm_confirm_keyboard, get_dm_receive_keyboard
 from config.settings import settings
 
 router = Router()
+
+
+class IsReplyFilter(BaseFilter):
+    """Filter to check if callback is for a reply."""
+    
+    async def __call__(self, callback: CallbackQuery, state: FSMContext) -> bool:
+        """Check if this is a reply callback."""
+        if not callback.data or not callback.data.startswith("dm:confirm:"):
+            return False
+        
+        try:
+            sender_id = int(callback.data.split(":")[-1])
+        except (ValueError, IndexError):
+            return False
+        
+        state_data = await state.get_data()
+        reply_to_sender_id = state_data.get("dm_reply_to_sender_id")
+        
+        return reply_to_sender_id is not None and reply_to_sender_id == sender_id
 
 
 @router.callback_query(F.data.startswith("dm_list:view:"))
@@ -69,8 +90,9 @@ async def view_direct_messages_from_list(callback: CallbackQuery):
         sender_profile_id = f"/user_{sender.profile_id}"
         
         # Show all messages
+        from utils.validators import get_display_name
         messages_text = f"✉️ پیام‌های دایرکت\n\n"
-        messages_text += f"👤 از: {sender.username or 'نامشخص'}\n"
+        messages_text += f"👤 از: {get_display_name(sender)}\n"
         messages_text += f"⚧️ جنسیت: {gender_text}\n"
         messages_text += f"🆔 ID: {sender_profile_id}\n"
         messages_text += f"📊 تعداد پیام‌ها: {len(sender_messages)}\n\n"
@@ -84,7 +106,7 @@ async def view_direct_messages_from_list(callback: CallbackQuery):
         if len(messages_text) > 4000:
             # Telegram message limit, show only latest messages
             messages_text = f"✉️ پیام‌های دایرکت\n\n"
-            messages_text += f"👤 از: {sender.username or 'نامشخص'}\n"
+            messages_text += f"👤 از: {get_display_name(sender)}\n"
             messages_text += f"⚧️ جنسیت: {gender_text}\n"
             messages_text += f"📊 تعداد پیام‌ها: {len(sender_messages)}\n\n"
             messages_text += f"🆔 ID: {sender_profile_id}\n"            
@@ -173,7 +195,7 @@ async def reply_to_direct_message(callback: CallbackQuery, state: FSMContext):
         await state.set_state("dm:waiting_reply")
         
         await callback.message.answer(
-            f"✉️ پاسخ به {sender.username or 'کاربر'}\n\n"
+            f"✉️ پاسخ به {get_display_name(sender)}\n\n"
             "لطفاً متن پاسخ خود را بنویسید:"
         )
         await callback.answer()
@@ -220,7 +242,7 @@ async def process_dm_reply(message: Message, state: FSMContext):
         await message.answer(
             f"✉️ پاسخ به پیام دایرکت\n\n"
             f"📝 پاسخ شما:\n{reply_text}\n\n"
-            f"📤 برای: {sender.username or 'کاربر'}\n\n"
+            f"📤 برای: {get_display_name(sender)}\n\n"
             f"آیا می‌خواهید این پاسخ را ارسال کنید؟",
             reply_markup=get_dm_confirm_keyboard(sender_id)
         )
@@ -230,11 +252,14 @@ async def process_dm_reply(message: Message, state: FSMContext):
         break
 
 
-@router.callback_query(F.data.startswith("dm:confirm:"))
+@router.callback_query(F.data.startswith("dm:confirm:"), IsReplyFilter())
 async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
     """Confirm and send direct message reply."""
     sender_id = int(callback.data.split(":")[-1])
     user_id = callback.from_user.id
+    
+    # Get state data
+    state_data = await state.get_data()
     
     async for db_session in get_db():
         user = await get_user_by_telegram_id(db_session, user_id)
@@ -250,7 +275,6 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             return
         
         # Get reply text from state
-        state_data = await state.get_data()
         reply_text = state_data.get("dm_message_text")
         
         if not reply_text:
@@ -283,13 +307,15 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             # Get user profile ID
             user_profile_id = f"/user_{user.profile_id}"
             
+            # Send notification like a regular direct message
             await bot.send_message(
                 sender.telegram_id,
-                f"✉️ یک پاسخ به پیام دایرکت شما از {user.username or 'یک کاربر'} دریافت شد!\n\n"
-                f"👤 نام: {user.username or 'نامشخص'}\n"
+                f"✉️ یک پیام دایرکت از {get_display_name(user)} داری!\n\n"
+                f"👤 نام: {get_display_name(user)}\n"
                 f"⚧️ جنسیت: {gender_text}\n"
                 f"🆔 ID: {user_profile_id}\n\n"
-                f"📝 پاسخ:\n{reply_text}"
+                f"برای مشاهده پیام از دکمه زیر استفاده کن:",
+                reply_markup=get_dm_receive_keyboard(dm.id)
             )
             await bot.session.close()
         except Exception as e:
@@ -298,10 +324,58 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
         
         await callback.message.edit_text(
             "✅ پاسخ شما با موفقیت ارسال شد!\n\n"
-            f"پاسخ شما برای {sender.username or 'کاربر'} ارسال شد.",
+            f"پاسخ شما برای {get_display_name(sender)} ارسال شد.",
             reply_markup=None
         )
         await callback.answer("✅ پاسخ ارسال شد!")
         await state.clear()
+        break
+
+
+@router.callback_query(F.data.startswith("dm_list:delete_conversation:"))
+async def delete_conversation_handler(callback: CallbackQuery):
+    """Delete entire conversation between current user and another user."""
+    other_user_id = int(callback.data.split(":")[-1])
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        other_user = await get_user_by_id(db_session, other_user_id)
+        if not other_user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        # Delete all messages between the two users
+        deleted_count = await delete_conversation(db_session, user.id, other_user_id)
+        
+        if deleted_count > 0:
+            await callback.answer(f"✅ {deleted_count} پیام حذف شد", show_alert=True)
+            
+            # Refresh the direct messages list
+            message_list = await get_direct_message_list(db_session, user.id)
+            
+            if not message_list:
+                await callback.message.edit_text(
+                    "📭 شما هیچ پیام دایرکتی ندارید.",
+                    reply_markup=None
+                )
+            else:
+                # Create keyboard with buttons
+                keyboard = get_direct_messages_list_keyboard(message_list, page=0)
+                
+                list_text = f"✉️ پیام‌های دایرکت ({len(message_list)} پیام)\n\n"
+                list_text += "لیست کاربرانی که برای شما پیام فرستاده‌اند:\n"
+                list_text += "روی هر کاربر کلیک کنید تا پیام‌هایش را ببینید:"
+                
+                try:
+                    await callback.message.edit_text(list_text, reply_markup=keyboard)
+                except:
+                    await callback.message.answer(list_text, reply_markup=keyboard)
+        else:
+            await callback.answer("❌ پیامی برای حذف یافت نشد.", show_alert=True)
         break
 

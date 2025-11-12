@@ -48,8 +48,10 @@ class RateLimitMiddleware(BaseMiddleware):
             if not is_allowed:
                 # Rate limit exceeded
                 await event.answer(
-                    f"⏳ Rate limit exceeded. Please wait a moment before sending more messages.\n"
-                    f"You can send more messages in a few seconds."
+                    "⏱️ پیام‌هات خیلی سریع ارسال می‌شن! 🚦\n"
+                    "🌟 برای بهتر شدن تجربه‌ات، چند لحظه صبر کن و دوباره تلاش کن.\n\n"
+                    "🤖 ارسال سریع پیام شبیه رفتار رباتیه و ممکنه باعث محدودیت بشه.\n"
+                    "🙏 ممنون از همکاریت! ⏳"
                 )
                 return  # Don't process the message
         
