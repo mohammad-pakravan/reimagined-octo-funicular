@@ -27,6 +27,7 @@ from db.crud import (
 from bot.keyboards.profile import get_profile_keyboard
 from bot.keyboards.reply import get_chat_reply_keyboard, get_main_reply_keyboard
 from core.chat_manager import ChatManager
+from config.settings import settings
 
 router = Router()
 
@@ -42,31 +43,47 @@ def set_chat_manager(manager: ChatManager):
 @router.callback_query(F.data.startswith("profile:like:"))
 async def handle_like(callback: CallbackQuery):
     """Handle like/unlike action."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     partner_id = int(callback.data.split(":")[-1])
     user_id = callback.from_user.id
     
     async for db_session in get_db():
-        user = await get_user_by_telegram_id(db_session, user_id)
-        if not user:
-            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
-            return
-        
-        partner = await get_user_by_id(db_session, partner_id)
-        if not partner:
-            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
-            return
-        
-        # Check if already liked
-        is_liked_status = await is_liked(db_session, user.id, partner.id)
-        
-        if is_liked_status:
-            # Unlike
-            await unlike_user(db_session, user.id, partner.id)
-            await callback.answer("❤️ لایک برداشته شد")
-        else:
-            # Like
-            await like_user(db_session, user.id, partner.id)
-            await callback.answer("❤️ لایک شد!")
+        try:
+            user = await get_user_by_telegram_id(db_session, user_id)
+            if not user:
+                await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+                return
+            
+            partner = await get_user_by_id(db_session, partner_id)
+            if not partner:
+                await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+                return
+            
+            # Check if already liked
+            is_liked_status = await is_liked(db_session, user.id, partner.id)
+            
+            if is_liked_status:
+                # Unlike
+                success = await unlike_user(db_session, user.id, partner.id)
+                if success:
+                    logger.info(f"User {user.id} unliked user {partner.id}")
+                    await callback.answer("❤️ لایک برداشته شد")
+                else:
+                    logger.warning(f"Failed to unlike: User {user.id} -> {partner.id}")
+                    await callback.answer("❌ خطا در برداشتن لایک.", show_alert=True)
+                    return
+            else:
+                # Like
+                like_result = await like_user(db_session, user.id, partner.id)
+                if like_result:
+                    logger.info(f"User {user.id} liked user {partner.id}, like_id: {like_result.id}")
+                    await callback.answer("❤️ لایک شد!")
+                else:
+                    logger.warning(f"Failed to like: User {user.id} -> {partner.id} (may already be liked)")
+                    await callback.answer("❌ خطا در لایک کردن.", show_alert=True)
+                    return
         
             # Check and award badges for like achievements
             from core.achievement_system import AchievementSystem
@@ -135,29 +152,33 @@ async def handle_like(callback: CallbackQuery):
                 pass
             finally:
                 await badge_bot2.session.close()
-        
-        # Refresh partner data
-        await db_session.refresh(partner)
-        
-        # Update keyboard
-        is_liked_status = await is_liked(db_session, user.id, partner.id)
-        is_following_status = await is_following(db_session, user.id, partner.id)
-        is_blocked_status = await is_blocked(db_session, user.id, partner.id)
-        
-        is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
-        profile_keyboard = get_profile_keyboard(
-            partner_id=partner.id,
-            is_liked=is_liked_status,
-            is_following=is_following_status,
-            is_blocked=is_blocked_status,
-            like_count=partner.like_count or 0,
-            is_notifying=is_notifying_status
-        )
-        
-        try:
-            await callback.message.edit_reply_markup(reply_markup=profile_keyboard)
-        except:
-            pass
+            
+            # Refresh partner data
+            await db_session.refresh(partner)
+            
+            # Update keyboard
+            is_liked_status = await is_liked(db_session, user.id, partner.id)
+            is_following_status = await is_following(db_session, user.id, partner.id)
+            is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+            
+            is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
+            profile_keyboard = get_profile_keyboard(
+                partner_id=partner.id,
+                is_liked=is_liked_status,
+                is_following=is_following_status,
+                is_blocked=is_blocked_status,
+                like_count=partner.like_count or 0,
+                is_notifying=is_notifying_status
+            )
+            
+            try:
+                await callback.message.edit_reply_markup(reply_markup=profile_keyboard)
+            except Exception as e:
+                logger.error(f"Failed to update keyboard: {e}")
+                pass
+        except Exception as e:
+            logger.error(f"Error in handle_like: {e}", exc_info=True)
+            await callback.answer("❌ خطا در انجام عملیات لایک.", show_alert=True)
         
         break
 
@@ -165,31 +186,47 @@ async def handle_like(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("profile:follow:"))
 async def handle_follow(callback: CallbackQuery):
     """Handle follow/unfollow action."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     partner_id = int(callback.data.split(":")[-1])
     user_id = callback.from_user.id
     
     async for db_session in get_db():
-        user = await get_user_by_telegram_id(db_session, user_id)
-        if not user:
-            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
-            return
-        
-        partner = await get_user_by_id(db_session, partner_id)
-        if not partner:
-            await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
-            return
-        
-        # Check if already following
-        is_following_status = await is_following(db_session, user.id, partner.id)
-        
-        if is_following_status:
-            # Unfollow
-            await unfollow_user(db_session, user.id, partner.id)
-            await callback.answer("🚶 دنبال کردن لغو شد")
-        else:
-            # Follow
-            await follow_user(db_session, user.id, partner.id)
-            await callback.answer("✅ دنبال شد!")
+        try:
+            user = await get_user_by_telegram_id(db_session, user_id)
+            if not user:
+                await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+                return
+            
+            partner = await get_user_by_id(db_session, partner_id)
+            if not partner:
+                await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+                return
+            
+            # Check if already following
+            is_following_status = await is_following(db_session, user.id, partner.id)
+            
+            if is_following_status:
+                # Unfollow
+                success = await unfollow_user(db_session, user.id, partner.id)
+                if success:
+                    logger.info(f"User {user.id} unfollowed user {partner.id}")
+                    await callback.answer("🚶 دنبال کردن لغو شد")
+                else:
+                    logger.warning(f"Failed to unfollow: User {user.id} -> {partner.id}")
+                    await callback.answer("❌ خطا در لغو دنبال کردن.", show_alert=True)
+                    return
+            else:
+                # Follow
+                follow_result = await follow_user(db_session, user.id, partner.id)
+                if follow_result:
+                    logger.info(f"User {user.id} followed user {partner.id}, follow_id: {follow_result.id}")
+                    await callback.answer("✅ دنبال شد!")
+                else:
+                    logger.warning(f"Failed to follow: User {user.id} -> {partner.id} (may already be following)")
+                    await callback.answer("❌ خطا در دنبال کردن.", show_alert=True)
+                    return
             
             # Check and award badges for follow achievements
             from core.achievement_system import AchievementSystem
@@ -254,26 +291,30 @@ async def handle_follow(callback: CallbackQuery):
                 pass
             finally:
                 await badge_bot2.session.close()
-        
-        # Refresh keyboard
-        is_liked_status = await is_liked(db_session, user.id, partner.id)
-        is_following_status = await is_following(db_session, user.id, partner.id)
-        is_blocked_status = await is_blocked(db_session, user.id, partner.id)
-        
-        is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
-        profile_keyboard = get_profile_keyboard(
-            partner_id=partner.id,
-            is_liked=is_liked_status,
-            is_following=is_following_status,
-            is_blocked=is_blocked_status,
-            like_count=partner.like_count or 0,
-            is_notifying=is_notifying_status
-        )
-        
-        try:
-            await callback.message.edit_reply_markup(reply_markup=profile_keyboard)
-        except:
-            pass
+            
+            # Refresh keyboard
+            is_liked_status = await is_liked(db_session, user.id, partner.id)
+            is_following_status = await is_following(db_session, user.id, partner.id)
+            is_blocked_status = await is_blocked(db_session, user.id, partner.id)
+            
+            is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
+            profile_keyboard = get_profile_keyboard(
+                partner_id=partner.id,
+                is_liked=is_liked_status,
+                is_following=is_following_status,
+                is_blocked=is_blocked_status,
+                like_count=partner.like_count or 0,
+                is_notifying=is_notifying_status
+            )
+            
+            try:
+                await callback.message.edit_reply_markup(reply_markup=profile_keyboard)
+            except Exception as e:
+                logger.error(f"Failed to update keyboard: {e}")
+                pass
+        except Exception as e:
+            logger.error(f"Error in handle_follow: {e}", exc_info=True)
+            await callback.answer("❌ خطا در انجام عملیات فالو.", show_alert=True)
         
         break
 

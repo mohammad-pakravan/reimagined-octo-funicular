@@ -162,13 +162,38 @@ async def process_photo(message: Message, state: FSMContext):
     photo = message.photo[-1]
     file_id = photo.file_id
     
-    # Store photo file_id
-    if user_id not in registration_data:
-        registration_data[user_id] = {}
-    registration_data[user_id]["profile_image_url"] = file_id
+    # Upload photo to MinIO
+    from utils.minio_storage import upload_telegram_photo_to_minio
+    from aiogram import Bot
+    from config.settings import settings
+    import logging
+    logger = logging.getLogger(__name__)
     
-    # Complete registration
-    await complete_registration(message, state, user_id)
+    bot = Bot(token=settings.BOT_TOKEN)
+    try:
+        # Use telegram_id for filename generation (user may not exist in DB yet)
+        minio_url = await upload_telegram_photo_to_minio(bot, file_id, user_id)
+        if not minio_url:
+            logger.warning(f"Failed to upload photo to MinIO for user {user_id}, using file_id as fallback")
+            # Fallback to file_id if MinIO upload fails
+            minio_url = file_id
+        
+        # Store photo URL (MinIO URL or file_id as fallback)
+        if user_id not in registration_data:
+            registration_data[user_id] = {}
+        registration_data[user_id]["profile_image_url"] = minio_url
+        
+        # Complete registration
+        await complete_registration(message, state, user_id)
+    except Exception as e:
+        logger.error(f"Error uploading photo to MinIO during registration: {e}", exc_info=True)
+        # Fallback to file_id if error occurs
+        if user_id not in registration_data:
+            registration_data[user_id] = {}
+        registration_data[user_id]["profile_image_url"] = file_id
+        await complete_registration(message, state, user_id)
+    finally:
+        await bot.session.close()
 
 
 @router.callback_query(F.data == "registration:skip_photo")

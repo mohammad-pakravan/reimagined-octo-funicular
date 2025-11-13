@@ -190,7 +190,7 @@ class MyProfileEditStates(StatesGroup):
     waiting_new_province = State()
     waiting_new_age = State()
     waiting_new_gender = State()
-    waiting_new_username = State()
+    waiting_new_display_name = State()
 
 
 @router.callback_query(F.data == "my_profile:view")
@@ -280,19 +280,40 @@ async def process_new_photo(message: Message, state: FSMContext):
             await state.clear()
             return
         
-        await update_user_profile(
-            db_session,
-            user_id,
-            profile_image_url=file_id
-        )
+        # Upload photo to MinIO
+        from utils.minio_storage import upload_telegram_photo_to_minio
+        from aiogram import Bot
+        from config.settings import settings
         
-        # Check if profile is complete and notify referrer
-        await check_and_notify_profile_completion(db_session, user_id)
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            minio_url = await upload_telegram_photo_to_minio(bot, file_id, user.id)
+            if not minio_url:
+                await message.answer("❌ خطا در آپلود عکس. لطفاً دوباره تلاش کنید.")
+                await state.clear()
+                return
+            
+            await update_user_profile(
+                db_session,
+                user_id,
+                profile_image_url=minio_url
+            )
+            
+            # Check if profile is complete and notify referrer
+            await check_and_notify_profile_completion(db_session, user_id)
+            
+            await message.answer(
+                "✅ عکس پروفایل به‌روزرسانی شد!",
+                reply_markup=get_main_reply_keyboard()
+            )
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error uploading photo to MinIO: {e}", exc_info=True)
+            await message.answer("❌ خطا در آپلود عکس. لطفاً دوباره تلاش کنید.")
+        finally:
+            await bot.session.close()
         
-        await message.answer(
-            "✅ عکس پروفایل به‌روزرسانی شد!",
-            reply_markup=get_main_reply_keyboard()
-        )
         await state.clear()
         break
 
@@ -473,25 +494,25 @@ async def process_new_gender(callback: CallbackQuery, state: FSMContext):
         break
 
 
-@router.callback_query(F.data == "my_profile:edit_username")
-async def edit_username(callback: CallbackQuery, state: FSMContext):
-    """Start editing username."""
+@router.callback_query(F.data == "my_profile:edit_display_name")
+async def edit_display_name(callback: CallbackQuery, state: FSMContext):
+    """Start editing display name."""
     await callback.message.answer(
-        "📝 لطفاً نام کاربری جدید خود را بفرستید:",
+        "📝 لطفاً نام نمایشی جدید خود را بفرستید:",
         reply_markup=None
     )
-    await state.set_state(MyProfileEditStates.waiting_new_username)
+    await state.set_state(MyProfileEditStates.waiting_new_display_name)
     await callback.answer()
 
 
-@router.message(MyProfileEditStates.waiting_new_username)
-async def process_new_username(message: Message, state: FSMContext):
-    """Process new username."""
+@router.message(MyProfileEditStates.waiting_new_display_name)
+async def process_new_display_name(message: Message, state: FSMContext):
+    """Process new display name."""
     user_id = message.from_user.id
-    new_username = message.text.strip()
+    new_display_name = message.text.strip()
     
-    if len(new_username) < 2:
-        await message.answer("❌ نام کاربری باید حداقل 2 کاراکتر باشد.\n\nلطفاً دوباره نام کاربری را بفرستید:")
+    if len(new_display_name) < 2:
+        await message.answer("❌ نام نمایشی باید حداقل 2 کاراکتر باشد.\n\nلطفاً دوباره نام نمایشی را بفرستید:")
         return
     
     async for db_session in get_db():
@@ -504,14 +525,14 @@ async def process_new_username(message: Message, state: FSMContext):
         await update_user_profile(
             db_session,
             user_id,
-            username=new_username
+            display_name=new_display_name
         )
         
         # Check if profile is complete and notify referrer
         await check_and_notify_profile_completion(db_session, user_id)
         
         await message.answer(
-            f"✅ نام کاربری به {new_username} تغییر یافت!",
+            f"✅ نام نمایشی به {new_display_name} تغییر یافت!",
             reply_markup=get_main_reply_keyboard()
         )
         await state.clear()
@@ -558,21 +579,19 @@ async def inline_following_list(inline_query: InlineQuery):
             # Get profile image for thumbnail
             profile_image_url = getattr(followed_user, 'profile_image_url', None)
             
-            # Get thumbnail URL - if it's a file_id, convert to URL
-            thumbnail_url = None
-            if profile_image_url:
-                if profile_image_url.startswith(('http://', 'https://')):
-                    thumbnail_url = profile_image_url
-                else:
-                    # It's a Telegram file_id, get file URL
-                    try:
-                        bot = Bot(token=settings.BOT_TOKEN)
-                        file = await bot.get_file(profile_image_url)
-                        thumbnail_url = f"https://api.telegram.org/file/bot{settings.BOT_TOKEN}/{file.file_path}"
-                        await bot.session.close()
-                    except Exception:
-                        # If failed, use no thumbnail
-                        thumbnail_url = None
+            # Get thumbnail URL - only use if accessible from internet
+            from utils.minio_storage import get_telegram_thumbnail_url
+            thumbnail_url = get_telegram_thumbnail_url(profile_image_url) if profile_image_url else None
+            
+            # If it's a file_id and thumbnail_url is None, try to get Telegram file URL
+            if not thumbnail_url and profile_image_url and not profile_image_url.startswith(('http://', 'https://')):
+                try:
+                    bot = Bot(token=settings.BOT_TOKEN)
+                    file = await bot.get_file(profile_image_url)
+                    thumbnail_url = f"https://api.telegram.org/file/bot{settings.BOT_TOKEN}/{file.file_path}"
+                    await bot.session.close()
+                except Exception:
+                    thumbnail_url = None
             
             results.append(
                 InlineQueryResultArticle(
@@ -709,21 +728,19 @@ async def inline_liked_list(inline_query: InlineQuery):
             # Get profile image for thumbnail
             profile_image_url = getattr(liked_user, 'profile_image_url', None)
             
-            # Get thumbnail URL - if it's a file_id, convert to URL
-            thumbnail_url = None
-            if profile_image_url:
-                if profile_image_url.startswith(('http://', 'https://')):
-                    thumbnail_url = profile_image_url
-                else:
-                    # It's a Telegram file_id, get file URL
-                    try:
-                        bot = Bot(token=settings.BOT_TOKEN)
-                        file = await bot.get_file(profile_image_url)
-                        thumbnail_url = f"https://api.telegram.org/file/bot{settings.BOT_TOKEN}/{file.file_path}"
-                        await bot.session.close()
-                    except Exception:
-                        # If failed, use no thumbnail
-                        thumbnail_url = None
+            # Get thumbnail URL - only use if accessible from internet
+            from utils.minio_storage import get_telegram_thumbnail_url
+            thumbnail_url = get_telegram_thumbnail_url(profile_image_url) if profile_image_url else None
+            
+            # If it's a file_id and thumbnail_url is None, try to get Telegram file URL
+            if not thumbnail_url and profile_image_url and not profile_image_url.startswith(('http://', 'https://')):
+                try:
+                    bot = Bot(token=settings.BOT_TOKEN)
+                    file = await bot.get_file(profile_image_url)
+                    thumbnail_url = f"https://api.telegram.org/file/bot{settings.BOT_TOKEN}/{file.file_path}"
+                    await bot.session.close()
+                except Exception:
+                    thumbnail_url = None
             
             results.append(
                 InlineQueryResultArticle(
@@ -785,21 +802,19 @@ async def inline_blocked_list(inline_query: InlineQuery):
             # Get profile image for thumbnail
             profile_image_url = getattr(blocked_user, 'profile_image_url', None)
             
-            # Get thumbnail URL - if it's a file_id, convert to URL
-            thumbnail_url = None
-            if profile_image_url:
-                if profile_image_url.startswith(('http://', 'https://')):
-                    thumbnail_url = profile_image_url
-                else:
-                    # It's a Telegram file_id, get file URL
-                    try:
-                        bot = Bot(token=settings.BOT_TOKEN)
-                        file = await bot.get_file(profile_image_url)
-                        thumbnail_url = f"https://api.telegram.org/file/bot{settings.BOT_TOKEN}/{file.file_path}"
-                        await bot.session.close()
-                    except Exception:
-                        # If failed, use no thumbnail
-                        thumbnail_url = None
+            # Get thumbnail URL - only use if accessible from internet
+            from utils.minio_storage import get_telegram_thumbnail_url
+            thumbnail_url = get_telegram_thumbnail_url(profile_image_url) if profile_image_url else None
+            
+            # If it's a file_id and thumbnail_url is None, try to get Telegram file URL
+            if not thumbnail_url and profile_image_url and not profile_image_url.startswith(('http://', 'https://')):
+                try:
+                    bot = Bot(token=settings.BOT_TOKEN)
+                    file = await bot.get_file(profile_image_url)
+                    thumbnail_url = f"https://api.telegram.org/file/bot{settings.BOT_TOKEN}/{file.file_path}"
+                    await bot.session.close()
+                except Exception:
+                    thumbnail_url = None
             
             results.append(
                 InlineQueryResultArticle(

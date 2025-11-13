@@ -19,7 +19,7 @@ def get_my_profile_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✏️ ویرایش جنسیت", callback_data="my_profile:edit_gender"),
         ],
         [
-            InlineKeyboardButton(text="✏️ ویرایش نام کاربری", callback_data="my_profile:edit_username"),
+            InlineKeyboardButton(text="✏️ ویرایش نام نمایشی", callback_data="my_profile:edit_display_name"),
         ],
         [
             InlineKeyboardButton(text="❤️ لایک شده‌ها", switch_inline_query_current_chat="liked:"),
