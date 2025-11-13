@@ -492,22 +492,22 @@ async def follow_user(session: AsyncSession, follower_id: int, followed_id: int)
     logger = logging.getLogger(__name__)
     
     try:
-    # Check if already following
-    existing = await session.execute(
-        select(Follow).where(
-            and_(Follow.follower_id == follower_id, Follow.followed_id == followed_id)
+        # Check if already following
+        existing = await session.execute(
+            select(Follow).where(
+                and_(Follow.follower_id == follower_id, Follow.followed_id == followed_id)
+            )
         )
-    )
-    if existing.scalar_one_or_none():
+        if existing.scalar_one_or_none():
             logger.debug(f"User {follower_id} already following user {followed_id}")
-        return None  # Already following
-    
-    follow = Follow(follower_id=follower_id, followed_id=followed_id)
-    session.add(follow)
-    await session.commit()
-    await session.refresh(follow)
+            return None  # Already following
+        
+        follow = Follow(follower_id=follower_id, followed_id=followed_id)
+        session.add(follow)
+        await session.commit()
+        await session.refresh(follow)
         logger.info(f"Successfully followed: User {follower_id} -> {followed_id}, follow_id: {follow.id}")
-    return follow
+        return follow
     except Exception as e:
         logger.error(f"Error in follow_user: {e}", exc_info=True)
         await session.rollback()
