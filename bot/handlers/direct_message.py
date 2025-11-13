@@ -23,6 +23,7 @@ from db.crud import (
 from bot.keyboards.common import get_dm_confirm_keyboard, get_dm_receive_keyboard, get_dm_view_keyboard
 from bot.keyboards.reply import get_main_reply_keyboard
 from config.settings import settings
+from utils.validators import get_display_name
 
 router = Router()
 
@@ -64,7 +65,6 @@ async def process_dm_message(message: Message, state: FSMContext):
             return
         
         # Show confirmation
-        from utils.validators import get_display_name
         await message.answer(
             f"✉️ پیام دایرکت\n\n"
             f"📝 پیام شما:\n{message_text}\n\n"
@@ -141,7 +141,6 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             # Get user profile ID
             user_profile_id = f"/user_{user.profile_id}"
             
-            from utils.validators import get_display_name
             await bot.send_message(
                 receiver.telegram_id,
                 f"✉️ یک پیام دایرکت از {get_display_name(user)} داری!\n\n"
@@ -189,7 +188,6 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
         finally:
             await badge_bot.session.close()
         
-        from utils.validators import get_display_name
         await callback.message.edit_text(
             "✅ پیام دایرکت با موفقیت ارسال شد!\n\n"
             f"پیام شما برای {get_display_name(receiver)} ارسال شد.",
@@ -260,7 +258,6 @@ async def view_direct_message(callback: CallbackQuery):
         # Get keyboard with delete and block options
         view_keyboard = get_dm_view_keyboard(dm_id, dm.sender_id)
         
-        from utils.validators import get_display_name
         await callback.message.edit_text(
             f"✉️ پیام دایرکت\n\n"
             f"👤 از: {get_display_name(sender)}\n"
@@ -361,7 +358,6 @@ async def block_sender_from_dm_handler(callback: CallbackQuery):
         success = await block_user(db_session, user.id, sender_id)
         
         if success:
-            from utils.validators import get_display_name
             await callback.message.edit_text(
                 f"🚫 {get_display_name(sender)} بلاک شد.\n\n"
                 "این کاربر دیگر نمی‌تواند برای شما پیام دایرکت بفرستد.",
@@ -399,7 +395,6 @@ async def reply_to_direct_message_from_view(callback: CallbackQuery, state: FSMC
         await state.update_data(dm_reply_to_sender_id=sender_id)
         await state.set_state("dm:waiting_reply")
         
-        from utils.validators import get_display_name
         await callback.message.answer(
             f"✉️ پاسخ به {get_display_name(sender)}\n\n"
             "لطفاً متن پاسخ خود را بنویسید:"

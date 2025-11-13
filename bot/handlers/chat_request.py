@@ -19,6 +19,7 @@ from bot.keyboards.common import get_chat_request_keyboard, get_chat_request_can
 from bot.keyboards.reply import get_chat_reply_keyboard
 from core.chat_manager import ChatManager
 from config.settings import settings
+from utils.validators import get_display_name
 
 router = Router()
 
@@ -121,7 +122,6 @@ async def process_chat_request_message(message: Message, state: FSMContext):
             user_profile_id = f"/user_{user.profile_id}"
             
             # Build profile info text
-            from utils.validators import get_display_name
             profile_info = f"💬 درخواست چت جدید!\n\n"
             profile_info += f"👤 از: {get_display_name(user)}\n"
             profile_info += f"⚧️ جنسیت: {gender_text}\n"
@@ -171,7 +171,6 @@ async def process_chat_request_message(message: Message, state: FSMContext):
             break
         
         # Send confirmation message to requester with cancel button
-        from utils.validators import get_display_name
         cancel_keyboard = get_chat_request_cancel_keyboard(user.id, receiver.id)
         await message.answer(
             f"✅ درخواست چت شما برای {get_display_name(receiver)} ارسال شد.\n\n"
@@ -220,13 +219,12 @@ async def check_chat_request_timeout(requester_id: int, requester_telegram_id: i
             bot = Bot(token=settings.BOT_TOKEN)
             try:
                 from db.crud import get_user_by_id
-                from utils.validators import get_display_name
                 receiver = await get_user_by_id(db_session, receiver_id)
                 receiver_name = get_display_name(receiver) if receiver else "کاربر"
                 
                 await bot.send_message(
                     requester_telegram_id,
-                    f"⏰ متأسفانه {receiver_name or 'کاربر'} به درخواست چت شما پاسخ نداد.\n\n"
+                    f"⏰ متأسفانه {receiver_name} به درخواست چت شما پاسخ نداد.\n\n"
                     "💡 مثل اینکه کاربر آفلاین است یا درخواست را ندیده است.\n"
                     "می‌تونی دوباره امتحان کنی یا با کاربران دیگر چت کنی."
                 )
@@ -393,7 +391,6 @@ async def reject_chat_request(callback: CallbackQuery):
         # Notify requester (optional)
         bot = Bot(token=settings.BOT_TOKEN)
         try:
-            from utils.validators import get_display_name
             await bot.send_message(
                 requester.telegram_id,
                 f"❌ درخواست چت شما توسط {get_display_name(user)} رد شد."
@@ -444,7 +441,6 @@ async def cancel_chat_request(callback: CallbackQuery):
         # Notify receiver (optional - can be removed if not needed)
         bot = Bot(token=settings.BOT_TOKEN)
         try:
-            from utils.validators import get_display_name
             await bot.send_message(
                 receiver.telegram_id,
                 f"ℹ️ {get_display_name(user)} درخواست چت خود را لغو کرد."
@@ -454,7 +450,6 @@ async def cancel_chat_request(callback: CallbackQuery):
             pass
         
         # Update requester's message
-        from utils.validators import get_display_name
         try:
             await callback.message.edit_text(
                 "❌ درخواست چت لغو شد.\n\n"
@@ -497,7 +492,6 @@ async def block_from_chat_request(callback: CallbackQuery):
             # Notify requester (optional)
             bot = Bot(token=settings.BOT_TOKEN)
             try:
-                from utils.validators import get_display_name
                 await bot.send_message(
                     requester.telegram_id,
                     f"🚫 شما توسط {get_display_name(user)} بلاک شدید."
@@ -513,7 +507,7 @@ async def block_from_chat_request(callback: CallbackQuery):
                 pass
             
             # Show popup notification
-            await callback.answer(f"🚫 {requester.username or 'کاربر'} بلاک شد", show_alert=True)
+            await callback.answer(f"🚫 {get_display_name(requester)} بلاک شد", show_alert=True)
         else:
             await callback.answer("❌ خطا در بلاک کردن.", show_alert=True)
         break
