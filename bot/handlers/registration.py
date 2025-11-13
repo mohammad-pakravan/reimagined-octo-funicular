@@ -281,19 +281,19 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                     # User has used this code before, don't create referral
                     pass
                 else:
-                # Create referral
-                await create_referral(
-                    db_session,
-                    referral_code_obj.user_id,
-                    user.id,
+                    # Create referral
+                    await create_referral(
+                        db_session,
+                        referral_code_obj.user_id,
+                        user.id,
                         referral_code,
                         check_telegram_id=user_id
-                )
-                
-                await message.answer(
-                    f"✅ عضویت شما از طریق لینک دعوت ثبت شد!\n\n"
-                    f"💡 با تکمیل پروفایل خود (اسم، سن، شهر، تصویر)، سکه دریافت می‌کنی!"
-                )
+                    )
+                    
+                    await message.answer(
+                        f"✅ عضویت شما از طریق لینک دعوت ثبت شد!\n\n"
+                        f"💡 با تکمیل پروفایل خود (اسم، سن، شهر، تصویر)، سکه دریافت می‌کنی!"
+                    )
         
         # Check if profile is complete (username, age, city, profile_image_url)
         profile_complete = (
