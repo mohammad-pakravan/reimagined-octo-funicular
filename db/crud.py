@@ -420,30 +420,30 @@ async def like_user(session: AsyncSession, user_id: int, liked_user_id: int) -> 
     logger = logging.getLogger(__name__)
     
     try:
-    # Check if already liked
-    existing = await session.execute(
-        select(Like).where(
-            and_(Like.user_id == user_id, Like.liked_user_id == liked_user_id)
+        # Check if already liked
+        existing = await session.execute(
+            select(Like).where(
+                and_(Like.user_id == user_id, Like.liked_user_id == liked_user_id)
+            )
         )
-    )
-    if existing.scalar_one_or_none():
+        if existing.scalar_one_or_none():
             logger.debug(f"User {user_id} already liked user {liked_user_id}")
-        return None  # Already liked
-    
-    like = Like(user_id=user_id, liked_user_id=liked_user_id)
-    session.add(like)
-    
-    # Update like count
-    await session.execute(
-        update(User)
-        .where(User.id == liked_user_id)
-        .values(like_count=User.like_count + 1)
-    )
-    
-    await session.commit()
-    await session.refresh(like)
+            return None  # Already liked
+        
+        like = Like(user_id=user_id, liked_user_id=liked_user_id)
+        session.add(like)
+        
+        # Update like count
+        await session.execute(
+            update(User)
+            .where(User.id == liked_user_id)
+            .values(like_count=User.like_count + 1)
+        )
+        
+        await session.commit()
+        await session.refresh(like)
         logger.info(f"Successfully liked: User {user_id} -> {liked_user_id}, like_id: {like.id}")
-    return like
+        return like
     except Exception as e:
         logger.error(f"Error in like_user: {e}", exc_info=True)
         await session.rollback()
