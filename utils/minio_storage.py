@@ -201,25 +201,23 @@ def is_url_accessible_from_internet(url: str) -> bool:
         url: URL to check
         
     Returns:
-        True if URL is HTTPS and not localhost, False otherwise
+        True if URL is HTTP/HTTPS and not localhost, False otherwise
     """
     if not url:
         return False
     
-    # Must be HTTPS for Telegram
-    if not url.startswith('https://'):
+    # Must be HTTP or HTTPS
+    if not url.startswith(('http://', 'https://')):
         return False
     
     # Check if it's localhost or internal IP
     url_lower = url.lower()
-    if any(blocked in url_lower for blocked in ['localhost', '127.0.0.1', '0.0.0.0', '::1', 'minio:']):
+    if any(blocked in url_lower for blocked in ['localhost', '127.0.0.1', '0.0.0.0', '::1', 'minio:', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.', '10.']):
         return False
     
-    # Check if it's a Docker internal network
-    if ':9000' in url or ':9001' in url:
-        # If it's using internal Docker network, it's not accessible
-        if 'minio:' in url_lower or 'localhost' in url_lower:
-            return False
+    # Check if it's a Docker internal network name
+    if 'minio:' in url_lower:
+        return False
     
     return True
 
@@ -238,13 +236,10 @@ def get_telegram_thumbnail_url(url: str) -> Optional[str]:
     if not url:
         return None
     
-    # If it's already an HTTPS URL and accessible, use it
-    if url.startswith('https://') and is_url_accessible_from_internet(url):
-        return url
-    
-    # If it's HTTP, don't use it (Telegram requires HTTPS for thumbnails)
-    if url.startswith('http://'):
-        return None
+    # If it's an HTTP/HTTPS URL and accessible, use it
+    if url.startswith(('http://', 'https://')):
+        if is_url_accessible_from_internet(url):
+            return url
     
     # If it's a file_id, we can't use it directly as thumbnail
     # Telegram will handle it automatically if we don't provide thumbnail_url

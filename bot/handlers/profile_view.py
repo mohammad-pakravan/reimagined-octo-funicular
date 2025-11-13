@@ -115,9 +115,18 @@ async def view_user_profile(message: Message):
             
             bot = Bot(token=settings.BOT_TOKEN)
             try:
-                # Check if URL is accessible from internet
+                # Check if it's a URL or file_id
                 if profile_image_url.startswith(('http://', 'https://')):
-                    if not is_url_accessible_from_internet(profile_image_url):
+                    # It's a URL - check if accessible
+                    if is_url_accessible_from_internet(profile_image_url):
+                        # URL is accessible, use directly
+                        await bot.send_photo(
+                            user_id,
+                            profile_image_url,
+                            caption=profile_text,
+                            reply_markup=profile_keyboard
+                        )
+                    else:
                         # URL is not accessible, download and re-upload
                         try:
                             import aiohttp
@@ -125,7 +134,6 @@ async def view_user_profile(message: Message):
                                 async with session.get(profile_image_url) as resp:
                                     if resp.status == 200:
                                         image_data = await resp.read()
-                                        # Send as photo from bytes
                                         from aiogram.types import BufferedInputFile
                                         photo_file = BufferedInputFile(image_data, filename="profile.jpg")
                                         await bot.send_photo(
@@ -138,16 +146,7 @@ async def view_user_profile(message: Message):
                                         raise Exception(f"Failed to download image: {resp.status}")
                         except Exception as e:
                             logger.warning(f"Failed to download and send MinIO image: {e}")
-                            # Fallback to text only
                             await message.answer(profile_text, reply_markup=profile_keyboard)
-                    else:
-                        # URL is accessible, use directly
-                        await bot.send_photo(
-                            user_id,
-                            profile_image_url,
-                            caption=profile_text,
-                            reply_markup=profile_keyboard
-                        )
                 else:
                     # It's a file_id, use directly
                     await bot.send_photo(
@@ -159,7 +158,6 @@ async def view_user_profile(message: Message):
                 await bot.session.close()
             except Exception as e:
                 logger.error(f"Error sending photo: {e}", exc_info=True)
-                # If photo fails, send text only
                 await message.answer(profile_text, reply_markup=profile_keyboard)
         else:
             await message.answer(profile_text, reply_markup=profile_keyboard)
@@ -258,9 +256,18 @@ async def view_user_profile_regex(message: Message):
             
             bot = Bot(token=settings.BOT_TOKEN)
             try:
-                # Check if URL is accessible from internet
+                # Check if it's a URL or file_id
                 if profile_image_url.startswith(('http://', 'https://')):
-                    if not is_url_accessible_from_internet(profile_image_url):
+                    # It's a URL - check if accessible
+                    if is_url_accessible_from_internet(profile_image_url):
+                        # URL is accessible, use directly
+                        await bot.send_photo(
+                            user_id,
+                            profile_image_url,
+                            caption=profile_text,
+                            reply_markup=profile_keyboard
+                        )
+                    else:
                         # URL is not accessible, download and re-upload
                         try:
                             import aiohttp
@@ -268,7 +275,6 @@ async def view_user_profile_regex(message: Message):
                                 async with session.get(profile_image_url) as resp:
                                     if resp.status == 200:
                                         image_data = await resp.read()
-                                        # Send as photo from bytes
                                         from aiogram.types import BufferedInputFile
                                         photo_file = BufferedInputFile(image_data, filename="profile.jpg")
                                         await bot.send_photo(
@@ -281,16 +287,7 @@ async def view_user_profile_regex(message: Message):
                                         raise Exception(f"Failed to download image: {resp.status}")
                         except Exception as e:
                             logger.warning(f"Failed to download and send MinIO image: {e}")
-                            # Fallback to text only
                             await message.answer(profile_text, reply_markup=profile_keyboard)
-                    else:
-                        # URL is accessible, use directly
-                        await bot.send_photo(
-                            user_id,
-                            profile_image_url,
-                            caption=profile_text,
-                            reply_markup=profile_keyboard
-                        )
                 else:
                     # It's a file_id, use directly
                     await bot.send_photo(

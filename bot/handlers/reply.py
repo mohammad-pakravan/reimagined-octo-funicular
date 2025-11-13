@@ -314,17 +314,55 @@ async def partner_profile_button(message: Message):
         if profile_image_url:
             from aiogram import Bot
             from config.settings import settings
+            from utils.minio_storage import is_url_accessible_from_internet
+            import logging
+            logger = logging.getLogger(__name__)
+            
             bot = Bot(token=settings.BOT_TOKEN)
             try:
-                await bot.send_photo(
-                    user_id,
-                    profile_image_url,
-                    caption=profile_text,
-                    reply_markup=profile_keyboard
-                )
+                # Check if it's a URL or file_id
+                if profile_image_url.startswith(('http://', 'https://')):
+                    # It's a URL - check if accessible
+                    if is_url_accessible_from_internet(profile_image_url):
+                        # URL is accessible, use directly
+                        await bot.send_photo(
+                            user_id,
+                            profile_image_url,
+                            caption=profile_text,
+                            reply_markup=profile_keyboard
+                        )
+                    else:
+                        # URL is not accessible, download and re-upload
+                        try:
+                            import aiohttp
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(profile_image_url) as resp:
+                                    if resp.status == 200:
+                                        image_data = await resp.read()
+                                        from aiogram.types import BufferedInputFile
+                                        photo_file = BufferedInputFile(image_data, filename="profile.jpg")
+                                        await bot.send_photo(
+                                            user_id,
+                                            photo_file,
+                                            caption=profile_text,
+                                            reply_markup=profile_keyboard
+                                        )
+                                    else:
+                                        raise Exception(f"Failed to download image: {resp.status}")
+                        except Exception as e:
+                            logger.warning(f"Failed to download and send MinIO image: {e}")
+                            await message.answer(profile_text, reply_markup=profile_keyboard)
+                else:
+                    # It's a file_id, use directly
+                    await bot.send_photo(
+                        user_id,
+                        profile_image_url,
+                        caption=profile_text,
+                        reply_markup=profile_keyboard
+                    )
                 await bot.session.close()
-            except Exception:
-                # If photo fails, send text only
+            except Exception as e:
+                logger.error(f"Error sending photo: {e}", exc_info=True)
                 await message.answer(profile_text, reply_markup=profile_keyboard)
         else:
             await message.answer(profile_text, reply_markup=profile_keyboard)
