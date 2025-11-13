@@ -171,9 +171,10 @@ async def process_chat_request_message(message: Message, state: FSMContext):
             break
         
         # Send confirmation message to requester with cancel button
+        from utils.validators import get_display_name
         cancel_keyboard = get_chat_request_cancel_keyboard(user.id, receiver.id)
         await message.answer(
-            f"✅ درخواست چت شما برای {receiver.username or 'کاربر'} ارسال شد.\n\n"
+            f"✅ درخواست چت شما برای {get_display_name(receiver)} ارسال شد.\n\n"
             "⏳ منتظر پاسخ باشید...\n\n"
             "💡 می‌تونی درخواست رو لغو کنی:",
             reply_markup=cancel_keyboard
@@ -219,8 +220,9 @@ async def check_chat_request_timeout(requester_id: int, requester_telegram_id: i
             bot = Bot(token=settings.BOT_TOKEN)
             try:
                 from db.crud import get_user_by_id
+                from utils.validators import get_display_name
                 receiver = await get_user_by_id(db_session, receiver_id)
-                receiver_name = receiver.username if receiver else "کاربر"
+                receiver_name = get_display_name(receiver) if receiver else "کاربر"
                 
                 await bot.send_message(
                     requester_telegram_id,
@@ -452,16 +454,17 @@ async def cancel_chat_request(callback: CallbackQuery):
             pass
         
         # Update requester's message
+        from utils.validators import get_display_name
         try:
             await callback.message.edit_text(
                 "❌ درخواست چت لغو شد.\n\n"
-                f"درخواست چت شما برای {receiver.username or 'کاربر'} لغو شد.",
+                f"درخواست چت شما برای {get_display_name(receiver)} لغو شد.",
                 reply_markup=None
             )
         except Exception:
             await callback.message.answer(
                 "❌ درخواست چت لغو شد.\n\n"
-                f"درخواست چت شما برای {receiver.username or 'کاربر'} لغو شد."
+                f"درخواست چت شما برای {get_display_name(receiver)} لغو شد."
             )
         
         await callback.answer("✅ درخواست چت لغو شد")

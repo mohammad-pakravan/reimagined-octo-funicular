@@ -178,11 +178,11 @@ async def premium_buy(callback: CallbackQuery):
             return
         
         try:
-            await callback.message.edit_text(
-                "💎 پلن‌های پریمیوم\n\n"
-                "یکی از پلن‌های زیر را انتخاب کنید:",
-                reply_markup=get_user_premium_plans_keyboard(plans)
-            )
+        await callback.message.edit_text(
+            "💎 پلن‌های پریمیوم\n\n"
+            "یکی از پلن‌های زیر را انتخاب کنید:",
+            reply_markup=get_user_premium_plans_keyboard(plans)
+        )
         except Exception:
             # If edit fails (e.g., message not modified), send new message
             await callback.message.answer(
@@ -213,17 +213,17 @@ async def premium_purchase(callback: CallbackQuery):
             expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "هرگز"
             
             try:
-                await callback.message.edit_text(
-                    f"💎 وضعیت پریمیوم\n\n"
-                    f"✅ شما اشتراک پریمیوم فعال دارید!\n\n"
-                    f"تاریخ انقضا: {expires_at}\n\n"
-                    f"ویژگی‌های پریمیوم:\n"
+            await callback.message.edit_text(
+                f"💎 وضعیت پریمیوم\n\n"
+                f"✅ شما اشتراک پریمیوم فعال دارید!\n\n"
+                f"تاریخ انقضا: {expires_at}\n\n"
+                f"ویژگی‌های پریمیوم:\n"
                     f"• تماس تصویری در وب اپ ( به زودی )\n"
                     f"• ارتباط بدون مصرف سکه\n"
                     f"• فیلترهای پیشرفته ( به زودی )\n"
                     f"• اولویت در صف (نفر اول صف)",
-                    reply_markup=get_main_menu_keyboard()
-                )
+                reply_markup=get_main_menu_keyboard()
+            )
             except Exception:
                 # If edit fails (e.g., message not modified), ignore
                 pass
@@ -261,10 +261,10 @@ async def premium_purchase(callback: CallbackQuery):
                 text += "پلن مورد نظر را انتخاب کنید:"
                 
                 try:
-                    await callback.message.edit_text(
-                        text,
-                        reply_markup=get_user_premium_plans_keyboard(plans)
-                    )
+                await callback.message.edit_text(
+                    text,
+                    reply_markup=get_user_premium_plans_keyboard(plans)
+                )
                 except Exception:
                     # If edit fails (e.g., message not modified), send new message
                     await callback.message.answer(
@@ -274,8 +274,8 @@ async def premium_purchase(callback: CallbackQuery):
             else:
                 # Fallback to default if no plans
                 try:
-                    await callback.message.edit_text(
-                        f"💎 اشتراک پریمیوم\n\n"
+                await callback.message.edit_text(
+                    f"💎 اشتراک پریمیوم\n\n"
                         f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n\n"
                         f"• تماس تصویری در وب اپ ( به زودی )\n"
                         f"• ارتباط بدون مصرف سکه\n"
@@ -294,12 +294,12 @@ async def premium_purchase(callback: CallbackQuery):
                         f"• تماس تصویری در وب اپ ( به زودی )\n"
                         f"• ارتباط بدون مصرف سکه\n"
                         f"• فیلترهای پیشرفته ( به زودی )\n"
-                        f"• اولویت در صف (نفر اول صف)\n\n"
-                        f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
-                        f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
-                        f"آیا می‌خواهید پریمیوم بخرید?",
-                        reply_markup=get_premium_keyboard()
-                    )
+                    f"• اولویت در صف (نفر اول صف)\n\n"
+                    f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
+                    f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
+                    f"آیا می‌خواهید پریمیوم بخرید?",
+                    reply_markup=get_premium_keyboard()
+                )
         
         await callback.answer()
         break
@@ -451,10 +451,10 @@ async def premium_plan_purchase(callback: CallbackQuery):
         plan_info += "\n\nروش پرداخت را انتخاب کنید:"
         
         try:
-            await callback.message.edit_text(
-                plan_info,
-                reply_markup=get_premium_plan_payment_keyboard(plan)
-            )
+        await callback.message.edit_text(
+            plan_info,
+            reply_markup=get_premium_plan_payment_keyboard(plan)
+        )
         except Exception:
             # If edit fails (e.g., message not modified), send new message
             await callback.message.answer(
@@ -631,15 +631,15 @@ async def process_shaparak_payment(
         bot_username = "asdasdczaxcqeqwbot"  # Fallback to provided username
     
     try:
-        await callback.message.edit_text(
-            f"💳 پرداخت با زرین‌پال\n\n"
-            f"💎 پلن: {plan.plan_name}\n"
-            f"💰 مبلغ: {int(plan.price):,} تومان\n\n"
-            f"🔗 برای پرداخت روی لینک زیر کلیک کنید:\n\n"
-            f"{payment_link}\n\n"
-            f"💡 پس از پرداخت، می‌توانید از طریق لینک بازگشت به ربات برگردید.",
-            reply_markup=None
-        )
+    await callback.message.edit_text(
+        f"💳 پرداخت با زرین‌پال\n\n"
+        f"💎 پلن: {plan.plan_name}\n"
+        f"💰 مبلغ: {int(plan.price):,} تومان\n\n"
+        f"🔗 برای پرداخت روی لینک زیر کلیک کنید:\n\n"
+        f"{payment_link}\n\n"
+        f"💡 پس از پرداخت، می‌توانید از طریق لینک بازگشت به ربات برگردید.",
+        reply_markup=None
+    )
     except Exception:
         # If edit fails (e.g., message not modified), send new message
         await callback.message.answer(
@@ -768,7 +768,7 @@ async def premium_features(callback: CallbackQuery):
         # If edit fails (e.g., message not modified), send new message
         await callback.message.answer(
             features_text,
-            reply_markup=get_premium_keyboard()
-        )
+        reply_markup=get_premium_keyboard()
+    )
     await callback.answer()
 

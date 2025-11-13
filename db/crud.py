@@ -420,30 +420,30 @@ async def like_user(session: AsyncSession, user_id: int, liked_user_id: int) -> 
     logger = logging.getLogger(__name__)
     
     try:
-        # Check if already liked
-        existing = await session.execute(
-            select(Like).where(
-                and_(Like.user_id == user_id, Like.liked_user_id == liked_user_id)
-            )
+    # Check if already liked
+    existing = await session.execute(
+        select(Like).where(
+            and_(Like.user_id == user_id, Like.liked_user_id == liked_user_id)
         )
-        if existing.scalar_one_or_none():
+    )
+    if existing.scalar_one_or_none():
             logger.debug(f"User {user_id} already liked user {liked_user_id}")
-            return None  # Already liked
-        
-        like = Like(user_id=user_id, liked_user_id=liked_user_id)
-        session.add(like)
-        
-        # Update like count
-        await session.execute(
-            update(User)
-            .where(User.id == liked_user_id)
-            .values(like_count=User.like_count + 1)
-        )
-        
-        await session.commit()
-        await session.refresh(like)
+        return None  # Already liked
+    
+    like = Like(user_id=user_id, liked_user_id=liked_user_id)
+    session.add(like)
+    
+    # Update like count
+    await session.execute(
+        update(User)
+        .where(User.id == liked_user_id)
+        .values(like_count=User.like_count + 1)
+    )
+    
+    await session.commit()
+    await session.refresh(like)
         logger.info(f"Successfully liked: User {user_id} -> {liked_user_id}, like_id: {like.id}")
-        return like
+    return like
     except Exception as e:
         logger.error(f"Error in like_user: {e}", exc_info=True)
         await session.rollback()
@@ -492,22 +492,22 @@ async def follow_user(session: AsyncSession, follower_id: int, followed_id: int)
     logger = logging.getLogger(__name__)
     
     try:
-        # Check if already following
-        existing = await session.execute(
-            select(Follow).where(
-                and_(Follow.follower_id == follower_id, Follow.followed_id == followed_id)
-            )
+    # Check if already following
+    existing = await session.execute(
+        select(Follow).where(
+            and_(Follow.follower_id == follower_id, Follow.followed_id == followed_id)
         )
-        if existing.scalar_one_or_none():
+    )
+    if existing.scalar_one_or_none():
             logger.debug(f"User {follower_id} already following user {followed_id}")
-            return None  # Already following
-        
-        follow = Follow(follower_id=follower_id, followed_id=followed_id)
-        session.add(follow)
-        await session.commit()
-        await session.refresh(follow)
+        return None  # Already following
+    
+    follow = Follow(follower_id=follower_id, followed_id=followed_id)
+    session.add(follow)
+    await session.commit()
+    await session.refresh(follow)
         logger.info(f"Successfully followed: User {follower_id} -> {followed_id}, follow_id: {follow.id}")
-        return follow
+    return follow
     except Exception as e:
         logger.error(f"Error in follow_user: {e}", exc_info=True)
         await session.rollback()

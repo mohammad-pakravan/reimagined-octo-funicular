@@ -64,10 +64,11 @@ async def process_dm_message(message: Message, state: FSMContext):
             return
         
         # Show confirmation
+        from utils.validators import get_display_name
         await message.answer(
             f"✉️ پیام دایرکت\n\n"
             f"📝 پیام شما:\n{message_text}\n\n"
-            f"📤 برای: {receiver.username or 'کاربر'}\n\n"
+            f"📤 برای: {get_display_name(receiver)}\n\n"
             f"آیا می‌خواهید این پیام را ارسال کنید؟",
             reply_markup=get_dm_confirm_keyboard(receiver_id)
         )
@@ -188,9 +189,10 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
         finally:
             await badge_bot.session.close()
         
+        from utils.validators import get_display_name
         await callback.message.edit_text(
             "✅ پیام دایرکت با موفقیت ارسال شد!\n\n"
-            f"پیام شما برای {receiver.username or 'کاربر'} ارسال شد.",
+            f"پیام شما برای {get_display_name(receiver)} ارسال شد.",
             reply_markup=None
         )
         await callback.answer("✅ پیام ارسال شد!")

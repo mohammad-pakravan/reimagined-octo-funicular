@@ -179,12 +179,12 @@ async def process_photo(message: Message, state: FSMContext):
             minio_url = file_id
         
         # Store photo URL (MinIO URL or file_id as fallback)
-        if user_id not in registration_data:
-            registration_data[user_id] = {}
+    if user_id not in registration_data:
+        registration_data[user_id] = {}
         registration_data[user_id]["profile_image_url"] = minio_url
-        
-        # Complete registration
-        await complete_registration(message, state, user_id)
+    
+    # Complete registration
+    await complete_registration(message, state, user_id)
     except Exception as e:
         logger.error(f"Error uploading photo to MinIO during registration: {e}", exc_info=True)
         # Fallback to file_id if error occurs
@@ -281,14 +281,14 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                     # User has used this code before, don't create referral
                     pass
                 else:
-                    # Create referral
-                    await create_referral(
-                        db_session,
-                        referral_code_obj.user_id,
-                        user.id,
+                # Create referral
+                await create_referral(
+                    db_session,
+                    referral_code_obj.user_id,
+                    user.id,
                         referral_code,
                         check_telegram_id=user_id
-                    )
+                )
                 
                 await message.answer(
                     f"✅ عضویت شما از طریق لینک دعوت ثبت شد!\n\n"
@@ -332,7 +332,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                         db_session,
                         user_id,
                         referral_code_obj.user_id
-                    )
+                )
                 
                 if not already_awarded:
                     # Get base coins from database (must be set by admin)
