@@ -95,18 +95,12 @@ async def upload_image_to_minio(
             content_type=content_type
         )
         
-        # Generate public URL
-        # Format: http://endpoint/bucket/filename
-        protocol = "https" if settings.MINIO_USE_SSL else "http"
-        endpoint = settings.MINIO_ENDPOINT
-        if endpoint.startswith('http://'):
-            endpoint = endpoint[7:]
-        elif endpoint.startswith('https://'):
-            endpoint = endpoint[8:]
+        # Generate public URL using MINIO_PUBLIC_URL
+        # Remove trailing slash if present
+        public_base_url = settings.MINIO_PUBLIC_URL.rstrip('/')
+        public_url = f"{public_base_url}/{settings.MINIO_BUCKET_NAME}/{filename}"
         
-        public_url = f"{protocol}://{endpoint}/{settings.MINIO_BUCKET_NAME}/{filename}"
-        
-        logger.info(f"Successfully uploaded image to MinIO: {filename}")
+        logger.info(f"Successfully uploaded image to MinIO: {filename}, public URL: {public_url}")
         return public_url
         
     except S3Error as e:

@@ -29,7 +29,7 @@ from bot.keyboards.my_profile import (
 )
 from bot.keyboards.reply import get_main_reply_keyboard
 from bot.keyboards.common import get_gender_keyboard, get_delete_account_confirm_keyboard
-from utils.validators import validate_age, parse_age, validate_city
+from utils.validators import validate_age, parse_age, validate_city, get_display_name
 
 router = Router()
 
@@ -573,7 +573,8 @@ async def inline_following_list(inline_query: InlineQuery):
             if not followed_user:
                 continue
             
-            username_display = username or f"User {followed_user_id}"
+            # Use display_name instead of username
+            display_name_text = get_display_name(followed_user)
             user_unique_id = f"/user_{profile_id or 'unknown'}"
             
             # Get profile image for thumbnail
@@ -596,7 +597,7 @@ async def inline_following_list(inline_query: InlineQuery):
             results.append(
                 InlineQueryResultArticle(
                     id=str(followed_user_id),
-                    title=f"👥 {username_display[:30]}",
+                    title=f"👥 {display_name_text[:30]}",
                     description=f"ID: {user_unique_id}",
                     thumbnail_url=thumbnail_url,
                     input_message_content=InputTextMessageContent(
@@ -722,7 +723,8 @@ async def inline_liked_list(inline_query: InlineQuery):
             if not liked_user:
                 continue
             
-            username_display = username or f"User {liked_user_id}"
+            # Use display_name instead of username
+            display_name_text = get_display_name(liked_user)
             user_unique_id = f"/user_{profile_id or 'unknown'}"
             
             # Get profile image for thumbnail
@@ -745,7 +747,7 @@ async def inline_liked_list(inline_query: InlineQuery):
             results.append(
                 InlineQueryResultArticle(
                     id=str(liked_user_id),
-                    title=f"❤️ {username_display[:30]}",
+                    title=f"❤️ {display_name_text[:30]}",
                     description=f"ID: {user_unique_id}",
                     thumbnail_url=thumbnail_url,
                     input_message_content=InputTextMessageContent(
@@ -796,7 +798,8 @@ async def inline_blocked_list(inline_query: InlineQuery):
             if not blocked_user:
                 continue
             
-            username_display = username or f"User {blocked_user_id}"
+            # Use display_name instead of username
+            display_name_text = get_display_name(blocked_user)
             user_unique_id = f"/user_{profile_id or 'unknown'}"
             
             # Get profile image for thumbnail
@@ -819,7 +822,7 @@ async def inline_blocked_list(inline_query: InlineQuery):
             results.append(
                 InlineQueryResultArticle(
                     id=str(blocked_user_id),
-                    title=f"🚫 {username_display[:30]}",
+                    title=f"🚫 {display_name_text[:30]}",
                     description=f"ID: {user_unique_id}",
                     thumbnail_url=thumbnail_url,
                     input_message_content=InputTextMessageContent(

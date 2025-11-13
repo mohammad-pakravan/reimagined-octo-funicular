@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     REDIS_MAX_CONNECTIONS: int = Field(default=50, description="Maximum Redis connection pool size")
     
     # MinIO configuration
-    MINIO_ENDPOINT: str = Field(default="localhost:9000", description="MinIO endpoint")
+    MINIO_ENDPOINT: str = Field(default="localhost:9000", description="MinIO endpoint (internal, for Docker)")
+    MINIO_PUBLIC_URL: str = Field(default="http://localhost:9000", description="MinIO public URL (accessible from internet)")
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO access key")
     MINIO_SECRET_KEY: str = Field(default="minioadmin", description="MinIO secret key")
     MINIO_BUCKET_NAME: str = Field(default="profile-images", description="MinIO bucket for profile images")
