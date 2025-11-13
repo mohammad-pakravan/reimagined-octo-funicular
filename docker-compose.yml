@@ -55,22 +55,6 @@ services:
     networks:
       - telecaht_network
 
-  minio:
-    image: minio/minio:latest
-    container_name: telecaht_minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    restart: unless-stopped
-    networks:
-      - telecaht_network
-
   bot:
     build:
       context: .
@@ -92,13 +76,13 @@ services:
       REDIS_PORT: 6379
       REDIS_DB: ${REDIS_DB:-0}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      # MinIO configuration
-      MINIO_ENDPOINT: minio:9000
-      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # MinIO configuration (external server)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-profile-images}
-      MINIO_USE_SSL: "false"
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       # Channel configuration
       MANDATORY_CHANNEL_ID: ${MANDATORY_CHANNEL_ID}
       # Admin configuration
@@ -125,7 +109,6 @@ services:
     depends_on:
       - redis
       - mysql
-      - minio
     restart: unless-stopped
     networks:
       - telecaht_network
@@ -134,7 +117,6 @@ services:
 volumes:
   redis_data:
   mysql_data:
-  minio_data:
 
 networks:
   telecaht_network:
