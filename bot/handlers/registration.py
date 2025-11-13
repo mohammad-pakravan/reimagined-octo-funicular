@@ -179,12 +179,12 @@ async def process_photo(message: Message, state: FSMContext):
             minio_url = file_id
         
         # Store photo URL (MinIO URL or file_id as fallback)
-    if user_id not in registration_data:
-        registration_data[user_id] = {}
+        if user_id not in registration_data:
+            registration_data[user_id] = {}
         registration_data[user_id]["profile_image_url"] = minio_url
-    
-    # Complete registration
-    await complete_registration(message, state, user_id)
+        
+        # Complete registration
+        await complete_registration(message, state, user_id)
     except Exception as e:
         logger.error(f"Error uploading photo to MinIO during registration: {e}", exc_info=True)
         # Fallback to file_id if error occurs
