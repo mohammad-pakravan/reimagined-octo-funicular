@@ -11,6 +11,7 @@ from bot.keyboards.reply import get_main_reply_keyboard, get_chat_reply_keyboard
 from bot.keyboards.common import get_chat_keyboard, get_preferred_gender_keyboard
 from core.chat_manager import ChatManager
 from config.settings import settings
+from utils.validators import get_display_name
 
 router = Router()
 
@@ -284,7 +285,7 @@ async def partner_profile_button(message: Message):
         partner_badges_display = await BadgeManager.get_user_badges_display(partner.id, limit=5)
         
         profile_text = (
-            f"• نام: {partner.username or 'تعیین نشده'}\n"
+            f"• نام: {get_display_name(partner) or 'تعیین نشده'}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {partner.province or 'تعیین نشده'}\n"
             f"• شهر: {partner.city or 'تعیین نشده'}\n"

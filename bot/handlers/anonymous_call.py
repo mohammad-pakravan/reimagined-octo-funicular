@@ -26,6 +26,7 @@ from bot.keyboards.anonymous_call import (
 from bot.keyboards.profile import get_profile_keyboard
 from bot.keyboards.common import get_main_menu_keyboard
 from config.settings import settings
+from utils.validators import get_display_name
 
 router = Router()
 
@@ -594,7 +595,7 @@ async def view_partner_profile(callback: CallbackQuery):
         
         profile_text = (
             f"👤 پروفایل کاربر\n\n"
-            f"• نام: {partner.username or 'تعیین نشده'}\n"
+            f"• نام: {get_display_name(partner) or 'تعیین نشده'}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {partner.province or 'تعیین نشده'}\n"
             f"• شهر: {partner.city or 'تعیین نشده'}\n"

@@ -21,6 +21,7 @@ from bot.keyboards.common import (
 )
 from bot.keyboards.reply import get_main_reply_keyboard, get_chat_reply_keyboard
 from config.settings import settings
+from utils.validators import get_display_name
 
 router = Router()
 
@@ -601,8 +602,8 @@ async def end_chat_confirm(callback: CallbackQuery):
                                     
                                     partner_profile_id = f"/user_{partner.profile_id}"
                                     
-                                    notify_msg = f"🔔 چت {partner.username or 'کاربر'} تمام شد!\n\n"
-                                    notify_msg += f"👤 نام: {partner.username or 'نامشخص'}\n"
+                                    notify_msg = f"🔔 چت {get_display_name(partner) or 'کاربر'} تمام شد!\n\n"
+                                    notify_msg += f"👤 نام: {get_display_name(partner) or 'نامشخص'}\n"
                                     notify_msg += f"⚧️ جنسیت: {gender_text}\n"
                                     
                                     if partner.age:
