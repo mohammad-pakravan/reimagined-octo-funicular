@@ -61,7 +61,7 @@ services:
       dockerfile: Dockerfile
     container_name: telecaht_bot
     ports:
-      - "12000:8000"  # FastAPI port
+      - "8000:8000"  # FastAPI port
     environment:
       # Bot configuration
       BOT_TOKEN: ${BOT_TOKEN}
