@@ -280,6 +280,10 @@ async def handle_reply_message(message: Message, state: FSMContext):
 @router.message(F.content_type.in_({ContentType.TEXT, ContentType.VOICE, ContentType.PHOTO, ContentType.VIDEO, ContentType.STICKER, ContentType.ANIMATION}))
 async def forward_message(message: Message, state: FSMContext):
     """Forward message to chat partner."""
+    # Skip dice messages - let game handler process them
+    if message.dice:
+        return
+    
     # Skip if user is in registration state or DM state
     from bot.handlers.registration import RegistrationStates
     current_state = await state.get_state()

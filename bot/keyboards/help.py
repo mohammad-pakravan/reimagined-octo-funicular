@@ -29,6 +29,9 @@ def get_help_menu_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🏆 رتبه‌بندی", callback_data="help:leaderboard"),
         InlineKeyboardButton(text="📞 تماس ناشناس", callback_data="help:anonymous_call"),
     ])
+    keyboard.append([
+        InlineKeyboardButton(text="🎮 بازی‌ها", callback_data="help:games"),
+    ])
     
     # Add support button if SUPPORT_ADMIN is configured
     if settings.SUPPORT_ADMIN:
