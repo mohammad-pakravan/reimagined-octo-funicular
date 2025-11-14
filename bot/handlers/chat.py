@@ -175,13 +175,13 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         
         # Helper function to generate cost summary
         def get_search_cost_summary():
-            if user_premium:
+        if user_premium:
                 return "💰 هزینه: رایگان (پریمیوم)"
-            elif preferred_gender is None:
+        elif preferred_gender is None:
                 return "💰 هزینه: رایگان (همه)"
             elif user_points < chat_cost:
                 return f"⚠️ سکه کافی نداری ({chat_cost} سکه نیاز داری)"
-            else:
+        else:
                 return f"💰 هزینه: {chat_cost} سکه"
         
         cost_summary = get_search_cost_summary()
@@ -675,7 +675,7 @@ async def end_chat_confirm(callback: CallbackQuery):
                 elif was_cost_deducted:
                     if coins_refunded:
                         return f"💰 {chat_cost} سکه برگشت داده شد"
-                    else:
+            else:
                         return f"💰 {chat_cost} سکه کسر شد"
                 elif pref_gender is None:
                     return "💰 این چت رایگان بود (همه)"
