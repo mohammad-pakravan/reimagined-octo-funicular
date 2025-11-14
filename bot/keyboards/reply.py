@@ -43,12 +43,12 @@ def get_chat_reply_keyboard(private_mode: bool = False) -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardBuilder()
     
     keyboard.add(KeyboardButton(text="👤 پروفایل مخاطب"))
+    keyboard.add(KeyboardButton(text="🎮 بازی"))
     # Update button text based on private mode status
     if private_mode:
         keyboard.add(KeyboardButton(text="🟢 حالت خصوصی"))
     else:
         keyboard.add(KeyboardButton(text="⚪ حالت خصوصی"))
-    keyboard.add(KeyboardButton(text="🎮 بازی"))
     keyboard.add(KeyboardButton(text="❌ قطع مکالمه"))
     
     keyboard.adjust(2, 2)

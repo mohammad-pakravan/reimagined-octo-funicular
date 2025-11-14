@@ -164,7 +164,7 @@ def get_game_type_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🏀 بسکتبال", callback_data="game:type:basketball"),
-            InlineKeyboardButton(text="🎰 اسلوت", callback_data="game:type:slot_machine"),
+            InlineKeyboardButton(text="🎰 اسلات", callback_data="game:type:slot_machine"),
         ],
         [
             InlineKeyboardButton(text="❌ لغو", callback_data="game:cancel"),
@@ -271,7 +271,7 @@ async def select_game_type(callback: CallbackQuery, state: FSMContext):
             GAME_TYPE_DICE: "تاس",
             GAME_TYPE_DART: "دارت",
             GAME_TYPE_BASKETBALL: "بسکتبال",
-            GAME_TYPE_SLOT_MACHINE: "اسلوت"
+            GAME_TYPE_SLOT_MACHINE: "اسلات"
         }
         game_name = game_names.get(game_type, "بازی")
         await callback.message.edit_text(
@@ -344,7 +344,7 @@ async def select_coin_amount(callback: CallbackQuery, state: FSMContext):
             GAME_TYPE_DICE: "تاس",
             GAME_TYPE_DART: "دارت",
             GAME_TYPE_BASKETBALL: "بسکتبال",
-            GAME_TYPE_SLOT_MACHINE: "اسلوت"
+            GAME_TYPE_SLOT_MACHINE: "اسلات"
         }
         game_name = game_names.get(game_type, "بازی")
         from utils.validators import get_display_name
@@ -465,7 +465,7 @@ async def accept_game_request(callback: CallbackQuery):
             GAME_TYPE_DICE: "تاس",
             GAME_TYPE_DART: "دارت",
             GAME_TYPE_BASKETBALL: "بسکتبال",
-            GAME_TYPE_SLOT_MACHINE: "اسلوت"
+            GAME_TYPE_SLOT_MACHINE: "اسلات"
         }
         game_emojis = {
             GAME_TYPE_DICE: DICE_EMOJI,
@@ -628,7 +628,7 @@ async def handle_game_start_button(message: Message):
                 GAME_TYPE_DICE: "🎲 تاس",
                 GAME_TYPE_DART: "🎯 دارت",
                 GAME_TYPE_BASKETBALL: "🏀 بسکتبال",
-                GAME_TYPE_SLOT_MACHINE: "🎰 اسلوت"
+                GAME_TYPE_SLOT_MACHINE: "🎰 اسلات"
             }
             game_name = game_names.get(game_type, "بازی")
             await bot.send_message(
@@ -815,7 +815,7 @@ async def _process_dice_message_from_send(sent_message: Message, user_db_id: int
         from bot.keyboards.reply import get_chat_reply_keyboard
         await bot.send_message(
             chat_id=user.telegram_id,
-            text="💬",
+            text=" ",
             reply_markup=get_chat_reply_keyboard()
         )
     except Exception as e:
@@ -1003,7 +1003,7 @@ async def _process_dice_message(message: Message, is_edited: bool = False):
             from bot.keyboards.reply import get_chat_reply_keyboard
             await bot.send_message(
                 chat_id=user.telegram_id,
-                text="💬",
+                text=" ",
                 reply_markup=get_chat_reply_keyboard()
             )
         except Exception as e:
@@ -1158,12 +1158,12 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
         try:
             await bot.send_message(
                 active_game["initiator_telegram_id"],
-                "💬",
+                " ",
                 reply_markup=get_chat_reply_keyboard()
             )
             await bot.send_message(
                 active_game["partner_telegram_id"],
-                "💬",
+                " ",
                 reply_markup=get_chat_reply_keyboard()
             )
         except Exception as e:
