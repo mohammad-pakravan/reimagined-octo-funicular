@@ -14,9 +14,10 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     # Row 1: Start Chat
     keyboard.add(KeyboardButton(text="💬 شروع چت"))
     
-    # Row 2: Premium, Free Coins
+    # Row 2: Premium, Free Coins, Search Users
     keyboard.add(KeyboardButton(text="💎 پریمیوم"))
     keyboard.add(KeyboardButton(text="💰 سکه ی رایگان"))
+    keyboard.add(KeyboardButton(text="🔍 جستجوی کاربران"))
     
     # Row 3: Rewards and Engagement
     keyboard.add(KeyboardButton(text="🎁 پاداش‌ها و تعامل"))
@@ -28,7 +29,7 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     # Row 5: Invite Friends
     keyboard.add(KeyboardButton(text="👥 دعوت دوستان( سکه رایگان )"))
     
-    keyboard.adjust(1, 2, 1, 2, 1)
+    keyboard.adjust(1, 3, 1, 2, 1)
     return keyboard.as_markup(resize_keyboard=True, persistent=True)
 
 
@@ -47,9 +48,10 @@ def get_chat_reply_keyboard(private_mode: bool = False) -> ReplyKeyboardMarkup:
         keyboard.add(KeyboardButton(text="🟢 حالت خصوصی"))
     else:
         keyboard.add(KeyboardButton(text="⚪ حالت خصوصی"))
+    keyboard.add(KeyboardButton(text="🎮 بازی"))
     keyboard.add(KeyboardButton(text="❌ قطع مکالمه"))
     
-    keyboard.adjust(2, 1)
+    keyboard.adjust(2, 2)
     return keyboard.as_markup(resize_keyboard=True, persistent=True)
 
 

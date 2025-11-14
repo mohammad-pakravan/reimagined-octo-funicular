@@ -100,6 +100,50 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         
         await callback.answer()
         
+        # Check if user has premium
+        from db.crud import check_user_premium
+        user_premium = await check_user_premium(db_session, user.id)
+        
+        # Get chat cost from system settings
+        from db.crud import get_system_setting_value, get_user_points
+        chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
+        try:
+            chat_cost = int(chat_cost_str)
+        except (ValueError, TypeError):
+            chat_cost = 3
+        
+        user_points = await get_user_points(db_session, user.id)
+        
+        # Check if user has enough coins before adding to queue
+        # Allow if: premium OR "all" selected OR has enough coins
+        if not user_premium and preferred_gender is not None and user_points < chat_cost:
+            # User doesn't have premium, selected specific gender, and doesn't have enough coins
+            # Show premium menu instead
+            from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
+            try:
+                await callback.message.edit_text(
+                    f"⚠️ سکه کافی نداری!\n\n"
+                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                    f"💎 سکه فعلی تو: {user_points}\n\n"
+                    f"💡 می‌تونی:\n"
+                    f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
+                    f"• یا پریمیوم بگیری (چت رایگان)\n"
+                    f"• یا «همه» رو انتخاب کنی (رایگان)",
+                    reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
+                )
+            except:
+                await callback.message.answer(
+                    f"⚠️ سکه کافی نداری!\n\n"
+                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                    f"💎 سکه فعلی تو: {user_points}\n\n"
+                    f"💡 می‌تونی:\n"
+                    f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
+                    f"• یا پریمیوم بگیری (چت رایگان)\n"
+                    f"• یا «همه» رو انتخاب کنی (رایگان)",
+                    reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
+                )
+            return
+        
         # Add user to queue with preferred gender (no filters)
         logger.info(f"DEBUG: User {user_id} adding to queue with preferred_gender: {preferred_gender}")
         await matchmaking_queue.add_user_to_queue(
@@ -117,22 +161,7 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         queue_count = await matchmaking_queue.get_total_queue_count()
         gender_counts = await matchmaking_queue.get_queue_count_by_gender()
         
-        # Check if user has premium
-        from db.crud import check_user_premium
-        user_premium = await check_user_premium(db_session, user.id)
-        
         from bot.keyboards.common import get_queue_status_keyboard
-        
-        # Get chat cost from system settings
-        from db.crud import get_system_setting_value
-        from core.points_manager import PointsManager
-        from db.crud import get_user_points
-        
-        chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
-        try:
-            chat_cost = int(chat_cost_str)
-        except (ValueError, TypeError):
-            chat_cost = 3
         
         # Get required message count from system settings
         required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
@@ -141,54 +170,27 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         except (ValueError, TypeError):
             required_message_count = 2
         
-        user_points = await get_user_points(db_session, user.id)
-        
         # Prepare queue status message with beautiful UI
         total_online = 983 + queue_count
-        queue_status_text = (
-            "🔍 در حال جستجو...\n\n"
-            f"👥 افراد آنلاین: {total_online} نفر\n\n"
-        )
         
-        # Add cost information
-        if user_premium:
-            queue_status_text += (
-                "💎 وضعیت: پریمیوم\n"
-                "💰 هزینه چت: رایگان\n\n"
-            )
-        elif preferred_gender is None:
-            queue_status_text += (
-                "🌐 انتخاب: همه\n"
-                "💰 هزینه چت: رایگان\n"
-                "💡 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نمی‌شه.\n\n"
-            )
-        else:
-            queue_status_text += (
-                f"💰 هزینه چت: {chat_cost} سکه\n"
-                f"💎 سکه‌های فعلی تو: {user_points}\n\n"
-            )
-            
-            if user_points < chat_cost:
-                queue_status_text += (
-                    f"⚠️ سکه کافی نداری!\n"
-                    f"برای شروع چت به {chat_cost} سکه نیاز داری.\n\n"
-                    f"💎 با خرید پریمیوم:\n"
-                    f"• هزینه چت: رایگان\n"
-                    f"• نفر اول صف\n"
-                    f"• امکانات بیشتر\n\n"
-                )
+        # Helper function to generate cost summary
+        def get_search_cost_summary():
+            if user_premium:
+                return "💰 هزینه: رایگان (پریمیوم)"
+            elif preferred_gender is None:
+                return "💰 هزینه: رایگان (همه)"
+            elif user_points < chat_cost:
+                return f"⚠️ سکه کافی نداری ({chat_cost} سکه نیاز داری)"
             else:
-                queue_status_text += (
-                    f"💡 نکته: وقتی هم‌چت پیدا بشه، {chat_cost} سکه ازت کسر می‌شه.\n"
-                    f"اگر چت موفقیت‌آمیز باشه (هر دو طرف حداقل {required_message_count} پیام بفرستن)، این سکه کسر می‌مونه.\n"
-                    f"در غیر این صورت، سکه‌ها بهت برمی‌گرده.\n\n"
-                    f"💎 با خرید پریمیوم:\n"
-                    f"• هزینه چت: رایگان\n"
-                    f"• نفر اول صف\n"
-                    f"• امکانات بیشتر\n\n"
-            )
+                return f"💰 هزینه: {chat_cost} سکه"
         
-        queue_status_text += "⏳ لطفاً صبر کنید، در حال پیدا کردن کسی برای شما هستیم..."
+        cost_summary = get_search_cost_summary()
+        
+        queue_status_text = (
+            f"🔍 در حال جستجو...\n\n"
+            f"{cost_summary}\n\n"
+            f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
+        )
         
         await callback.message.edit_text(
             queue_status_text,
@@ -378,82 +380,35 @@ async def try_find_match(telegram_id: int, db_session):
                                 await chat_manager.set_chat_cost_deducted(chat_room.id, matched_user.id, True)
                                 matched_user_points -= chat_cost
                     
+                    # Helper function to generate cost summary for match found
+                    def get_match_cost_summary(is_premium, pref_gender, coins_deducted, chat_cost, points):
+                        if is_premium:
+                            return "💰 هزینه: رایگان (پریمیوم)"
+                        elif pref_gender is None:
+                            return "💰 هزینه: رایگان (همه)"
+                        elif coins_deducted:
+                            return f"💰 {chat_cost} سکه کسر شد (باقی‌مانده: {points})"
+                        else:
+                            return f"⚠️ سکه کافی نداشتی ({chat_cost} سکه نیاز داری)"
+                    
                     # Prepare messages with beautiful UI
+                    user_cost_summary = get_match_cost_summary(
+                        user_premium, user_pref_gender, user_coins_deducted, chat_cost, user_points
+                    )
+                    matched_user_cost_summary = get_match_cost_summary(
+                        matched_user_premium, matched_user_pref_gender, matched_user_coins_deducted, chat_cost, matched_user_points
+                    )
+                    
                     user_msg = (
                         "✅ هم‌چت پیدا شد!\n\n"
-                        "🎉 شما الان به هم متصل شدید!\n"
-                        "💬 می‌تونید شروع به چت کنید.\n\n"
+                        f"{user_cost_summary}\n\n"
+                        "💬 می‌تونید شروع به چت کنید."
                     )
                     
                     matched_user_msg = (
                         "✅ هم‌چت پیدا شد!\n\n"
-                        "🎉 شما الان به هم متصل شدید!\n"
-                        "💬 می‌تونید شروع به چت کنید.\n\n"
-                    )
-                    
-                    # Add cost information
-                    if user_premium:
-                        user_msg += (
-                            "💎 وضعیت: پریمیوم\n"
-                            "💰 هزینه این چت: رایگان\n\n"
-                        )
-                    elif user_pref_gender is None:
-                        # "all" was selected - no coins deducted
-                        user_msg += (
-                            "💰 هزینه این چت: رایگان\n"
-                            "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نمی‌شه.\n\n"
-                        )
-                    elif user_coins_deducted:
-                        # Specific gender selected and coins were deducted
-                        user_msg += (
-                            f"💰 هزینه این چت: {chat_cost} سکه\n"
-                            f"💎 سکه‌های باقی‌مانده: {user_points}\n\n"
-                            f"💡 نکته: اگر چت موفقیت‌آمیز باشه (هر دو طرف حداقل 2 پیام بفرستن)، این سکه کسر می‌مونه.\n"
-                            f"در غیر این صورت، سکه‌ها بهت برمی‌گرده.\n\n"
-                            f"💎 با خرید پریمیوم:\n"
-                            f"• هزینه چت: رایگان\n"
-                            f"• نفر اول صف\n"
-                            f"• امکانات بیشتر\n\n"
-                        )
-                    else:
-                        # Specific gender selected but coins weren't deducted (probably didn't have enough coins)
-                        user_msg += (
-                            f"⚠️ سکه کافی نداشتی!\n"
-                            f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
-                            f"💎 سکه فعلی تو: {user_points}\n\n"
-                            f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی!\n\n"
-                            f"💎 با خرید پریمیوم:\n"
-                            f"• هزینه چت: رایگان\n"
-                            f"• نفر اول صف\n"
-                            f"• امکانات بیشتر\n\n"
-                        )
-                    
-                    if matched_user_premium:
-                        matched_user_msg += (
-                            "💎 وضعیت: پریمیوم\n"
-                            "💰 هزینه این چت: رایگان\n\n"
-                        )
-                    elif matched_user_pref_gender is None:
-                        # "all" was selected - no coins deducted
-                        matched_user_msg += (
-                            "💰 هزینه این چت: رایگان\n"
-                            "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نمی‌شه.\n\n"
-                        )
-                    elif matched_user_coins_deducted:
-                        # Specific gender selected and coins were deducted
-                        matched_user_msg += (
-                            f"💰 هزینه این چت: {chat_cost} سکه\n"
-                            f"💎 سکه‌های باقی‌مانده: {matched_user_points}\n\n"
-                            f"💡 نکته: اگر چت موفقیت‌آمیز باشه (هر دو طرف حداقل 2 پیام بفرستن)، این سکه کسر می‌مونه.\n"
-                            f"در غیر این صورت، سکه‌ها بهت برمی‌گرده.\n\n"
-                        )
-                    else:
-                        # Specific gender selected but coins weren't deducted (probably didn't have enough coins)
-                        matched_user_msg += (
-                            f"⚠️ سکه کافی نداشتی!\n"
-                            f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
-                            f"💎 سکه فعلی تو: {matched_user_points}\n\n"
-                            f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی!\n\n"
+                        f"{matched_user_cost_summary}\n\n"
+                        "💬 می‌تونید شروع به چت کنید."
                         )
                     
                     
@@ -550,6 +505,10 @@ async def end_chat_confirm(callback: CallbackQuery):
             user2_telegram_id = None
             if partner:
                 user2_telegram_id = partner.telegram_id
+            
+            # Add both users to each other's blocked list to prevent re-matching
+            if partner and matchmaking_queue:
+                await matchmaking_queue.add_blocked_user(user1_telegram_id, user2_telegram_id)
             
             # End chat room and get message counts
             end_result = await chat_manager.end_chat(chat_room.id, db_session)
@@ -708,156 +667,29 @@ async def end_chat_confirm(callback: CallbackQuery):
             user_current_points = await get_user_points(db_session, user.id)
             partner_current_points = await get_user_points(db_session, partner_id) if partner_id else 0
             
-            # Prepare end message for user with beautiful UI
-            user_end_message = (
-                "✅ چت به پایان رسید\n\n"
-            )
-            
-            if total_messages == 0:
-                user_end_message += (
-                    "💬 هیچ پیامی در این چت ارسال نشد.\n\n"
-                )
-            else:
-                user_end_message += (
-                    f"📊 آمار چت:\n"
-                    f"• پیام‌های شما: {current_user_count}\n"
-                    f"• پیام‌های هم‌چت: {partner_user_count}\n"
-                    f"• مجموع پیام‌ها: {total_messages}\n\n"
-                )
-            
-            # Add cost information for user
-            # Simple logic: check premium first, then check if coins were deducted, then check preferred_gender
-            if user_premium:
-                user_end_message += (
-                    "💎 وضعیت: پریمیوم\n"
-                    "💰 هزینه این چت: رایگان\n\n"
-                )
-            elif user_was_cost_deducted:
-                # Coins were deducted (user selected specific gender and had enough coins)
-                if chat_successful:
-                    user_end_message += (
-                        f"✅ چت موفقیت‌آمیز بود!\n"
-                        f"💰 هزینه این چت: {chat_cost} سکه (کسر شده)\n"
-                        f"💎 سکه‌های باقی‌مانده: {user_current_points}\n\n"
-                        f"💎 با خرید پریمیوم:\n"
-                        f"• هزینه چت: رایگان\n"
-                        f"• نفر اول صف\n"
-                        f"• امکانات بیشتر\n\n"
-                    )
-                else:
-                    if user_coins_refunded:
-                        # Get required message count from system settings
-                        required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
-                        try:
-                            required_message_count = int(required_message_count_str)
-                        except (ValueError, TypeError):
-                            required_message_count = 2
-                        
-                        user_end_message += (
-                            f"⚠️ چت موفقیت‌آمیز نبود.\n"
-                            f"💰 {chat_cost} سکه به حساب شما برگشت داده شد.\n"
-                            f"💎 سکه‌های فعلی: {user_current_points}\n\n"
-                            f"💡 نکته: برای کسر سکه، هر دو طرف باید حداقل {required_message_count} پیام بفرستن.\n\n"
-                        )
+            # Helper function to generate cost summary
+            def get_cost_summary(is_premium, was_cost_deducted, pref_gender, coins_refunded, chat_cost, current_points):
+                """Generate a short cost summary for the chat."""
+                if is_premium:
+                    return "💰 این چت رایگان بود (پریمیوم)"
+                elif was_cost_deducted:
+                    if coins_refunded:
+                        return f"💰 {chat_cost} سکه برگشت داده شد"
                     else:
-                        user_end_message += (
-                            f"⚠️ چت موفقیت‌آمیز نبود.\n"
-                            f"💰 تلاش برای بازگشت سکه انجام شد.\n"
-                            f"💎 سکه‌های فعلی: {user_current_points}\n\n"
-                        )
-            elif user_pref_gender is None:
-                # "all" was selected - no coins deducted
-                user_end_message += (
-                    "💰 هزینه این چت: رایگان\n"
-                    "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نشد.\n\n"
-                )
-            else:
-                # User selected specific gender but coins weren't deducted (probably didn't have enough coins)
-                user_end_message += (
-                    "💰 هزینه این چت: رایگان\n"
-                    "💡 هیچ سکه‌ای کسر نشد.\n\n"
-                )
-            
-            user_end_message += "بازگشت به منوی اصلی..."
-            
-            # Prepare end message for partner
-            partner_end_message = (
-                "✅ چت به پایان رسید\n\n"
-            )
-            
-            if total_messages == 0:
-                partner_end_message += (
-                    "💬 هیچ پیامی در این چت ارسال نشد.\n\n"
-                )
-            else:
-                partner_end_message += (
-                    f"📊 آمار چت:\n"
-                    f"• پیام‌های شما: {partner_user_count}\n"
-                    f"• پیام‌های هم‌چت: {current_user_count}\n"
-                    f"• مجموع پیام‌ها: {total_messages}\n\n"
-                )
-            
-            # Add cost information for partner
-            # Simple logic: check premium first, then check if coins were deducted, then check preferred_gender
-            if partner_id:
-                if partner_premium:
-                    partner_end_message += (
-                        "💎 وضعیت: پریمیوم\n"
-                        "💰 هزینه این چت: رایگان\n\n"
-                    )
-                elif partner_was_cost_deducted:
-                    # Coins were deducted (partner selected specific gender and had enough coins)
-                    if chat_successful:
-                        partner_end_message += (
-                            f"✅ چت موفقیت‌آمیز بود!\n"
-                            f"💰 هزینه این چت: {chat_cost} سکه (کسر شده)\n"
-                            f"💎 سکه‌های باقی‌مانده: {partner_current_points}\n\n"
-                            f"💎 با خرید پریمیوم:\n"
-                            f"• هزینه چت: رایگان\n"
-                            f"• نفر اول صف\n"
-                            f"• امکانات بیشتر\n\n"
-                        )
-                    else:
-                        if partner_coins_refunded:
-                            # Get required message count from system settings
-                            required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
-                            try:
-                                required_message_count = int(required_message_count_str)
-                            except (ValueError, TypeError):
-                                required_message_count = 2
-                            
-                            partner_end_message += (
-                                f"⚠️ چت موفقیت‌آمیز نبود.\n"
-                                f"💰 {chat_cost} سکه به حساب شما برگشت داده شد.\n"
-                                f"💎 سکه‌های فعلی: {partner_current_points}\n\n"
-                                f"💡 نکته: برای کسر سکه، هر دو طرف باید حداقل {required_message_count} پیام بفرستن.\n\n"
-                            )
-                        else:
-                            partner_end_message += (
-                                f"⚠️ چت موفقیت‌آمیز نبود.\n"
-                                f"💰 تلاش برای بازگشت سکه انجام شد.\n"
-                                f"💎 سکه‌های فعلی: {partner_current_points}\n\n"
-                            )
-                elif partner_pref_gender is None:
-                    # "all" was selected - no coins deducted
-                    partner_end_message += (
-                        "💰 هزینه این چت: رایگان\n"
-                        "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نشد.\n\n"
-                    )
+                        return f"💰 {chat_cost} سکه کسر شد"
+                elif pref_gender is None:
+                    return "💰 این چت رایگان بود (همه)"
                 else:
-                    # Partner selected specific gender but coins weren't deducted (probably didn't have enough coins)
-                    partner_end_message += (
-                        "💰 هزینه این چت: رایگان\n"
-                        "💡 هیچ سکه‌ای کسر نشد.\n\n"
-                    )
+                    return "💰 این چت رایگان بود"
             
-            partner_end_message += "بازگشت به منوی اصلی..."
-            
-            # Send message to user (only once)
-            # Always send a new message instead of editing, to ensure keyboard is shown
-            await callback.message.answer(
-                user_end_message,
-                reply_markup=get_main_reply_keyboard()
+            # Generate cost summary for user
+            user_cost_summary = get_cost_summary(
+                user_premium,
+                user_was_cost_deducted,
+                user_pref_gender,
+                user_coins_refunded,
+                chat_cost,
+                user_current_points
             )
             
             # Ask if user wants to search again and delete messages
@@ -871,22 +703,37 @@ async def end_chat_confirm(callback: CallbackQuery):
                 ],
             ])
             
+            from bot.keyboards.reply import get_main_reply_keyboard
+            # Send message with inline keyboard for search options
             await callback.message.answer(
-                "💬 چت شما قطع شد\n\n"
-                "🔍 می‌خوای دوباره جستجو کنی؟",
+                f"💬 چت شما قطع شد\n\n"
+                f"{user_cost_summary}\n\n"
+                f"🔍 می‌خوای دوباره جستجو کنی؟",
                 reply_markup=search_again_keyboard
             )
+            # Update keyboard to main keyboard by sending a message with reply keyboard
+            try:
+                await callback.message.answer(
+                    "📱 منوی اصلی",
+                    reply_markup=get_main_reply_keyboard()
+                )
+            except:
+                pass
             
             # Send message to partner if exists
             if partner:
+                # Generate cost summary for partner
+                partner_cost_summary = get_cost_summary(
+                    partner_premium,
+                    partner_was_cost_deducted,
+                    partner_pref_gender,
+                    partner_coins_refunded,
+                    chat_cost,
+                    partner_current_points
+                )
+                
                 bot = Bot(token=settings.BOT_TOKEN)
                 try:
-                    await bot.send_message(
-                        partner.telegram_id,
-                        partner_end_message,
-                        reply_markup=get_main_reply_keyboard()
-                    )
-                    
                     # Ask partner if they want to search again and delete messages
                     partner_search_again_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [
@@ -900,10 +747,21 @@ async def end_chat_confirm(callback: CallbackQuery):
                     
                     await bot.send_message(
                         partner.telegram_id,
-                        "💬 چت شما قطع شد\n\n"
-                        "🔍 می‌خوای دوباره جستجو کنی؟",
+                        f"💬 چت شما قطع شد\n\n"
+                        f"{partner_cost_summary}\n\n"
+                        f"🔍 می‌خوای دوباره جستجو کنی؟",
                         reply_markup=partner_search_again_keyboard
                     )
+                    # Update keyboard to main keyboard for partner
+                    from bot.keyboards.reply import get_main_reply_keyboard as get_main_kb
+                    try:
+                        await bot.send_message(
+                            partner.telegram_id,
+                            "📱 منوی اصلی",
+                            reply_markup=get_main_kb()
+                        )
+                    except:
+                        pass
                     
                     await bot.session.close()
                 except Exception:
@@ -1126,6 +984,7 @@ async def search_again_after_chat_end(callback: CallbackQuery, state: FSMContext
         
         # Show gender selection keyboard
         from bot.keyboards.common import get_preferred_gender_keyboard
+        from bot.keyboards.reply import get_main_reply_keyboard
         try:
             await callback.message.edit_text(
                 "👥 با چه جنسیتی می‌خوای چت کنی؟",
@@ -1136,6 +995,15 @@ async def search_again_after_chat_end(callback: CallbackQuery, state: FSMContext
                 "👥 با چه جنسیتی می‌خوای چت کنی؟",
                 reply_markup=get_preferred_gender_keyboard()
             )
+            # Update keyboard
+            try:
+                await callback.message.answer(
+                    "📱",
+                    reply_markup=get_main_reply_keyboard()
+                )
+                await asyncio.sleep(0.1)
+            except:
+                pass
         
         await callback.answer()
         break

@@ -24,6 +24,7 @@ class MatchmakingQueue:
         self.queue_prefix = "matchmaking:queue"
         self.user_data_prefix = "matchmaking:user"
         self.active_chats_prefix = "active:chats"
+        self.blocked_users_prefix = "matchmaking:blocked"
     
     def _get_queue_key(self, gender: Optional[str] = None, city: Optional[str] = None) -> str:
         """
@@ -231,6 +232,10 @@ class MatchmakingQueue:
             if not candidate_data:
                 continue
             
+            # Check if candidate is blocked (rejected/ended chat before)
+            if await self.is_user_blocked(user_id, candidate_id):
+                continue
+            
             # Check bidirectional matching:
             # 1. User wants candidate's gender (or all)
             # 2. Candidate wants user's gender (or all)
@@ -361,4 +366,67 @@ class MatchmakingQueue:
                     counts[gender] += 1
         
         return counts
+    
+    def _get_blocked_users_key(self, user_id: int) -> str:
+        """Get Redis key for user's blocked users list."""
+        return f"{self.blocked_users_prefix}:{user_id}"
+    
+    async def add_blocked_user(self, user_id: int, blocked_user_id: int, ttl: int = 3600 * 7) -> bool:
+        """
+        Add a user to another user's blocked list (to prevent re-matching).
+        
+        Args:
+            user_id: User who blocked/rejected/ended chat
+            blocked_user_id: User who was blocked/rejected/ended chat with
+            ttl: Time to live in seconds (default: 7 hours)
+            
+        Returns:
+            True if added successfully
+        """
+        blocked_key = self._get_blocked_users_key(user_id)
+        await self.redis.sadd(blocked_key, blocked_user_id)
+        await self.redis.expire(blocked_key, ttl)
+        
+        # Also add reverse blocking (bidirectional)
+        # If user A blocks user B, then B should also not match with A
+        reverse_blocked_key = self._get_blocked_users_key(blocked_user_id)
+        await self.redis.sadd(reverse_blocked_key, user_id)
+        await self.redis.expire(reverse_blocked_key, ttl)
+        
+        return True
+    
+    async def is_user_blocked(self, user_id: int, blocked_user_id: int) -> bool:
+        """
+        Check if a user is blocked by another user.
+        
+        Args:
+            user_id: User to check
+            blocked_user_id: User who might be blocked
+            
+        Returns:
+            True if blocked_user_id is in user_id's blocked list
+        """
+        blocked_key = self._get_blocked_users_key(user_id)
+        is_member = await self.redis.sismember(blocked_key, blocked_user_id)
+        return bool(is_member)
+    
+    async def remove_blocked_user(self, user_id: int, blocked_user_id: int) -> bool:
+        """
+        Remove a user from another user's blocked list.
+        
+        Args:
+            user_id: User who unblocked
+            blocked_user_id: User to unblock
+            
+        Returns:
+            True if removed successfully
+        """
+        blocked_key = self._get_blocked_users_key(user_id)
+        await self.redis.srem(blocked_key, blocked_user_id)
+        
+        # Also remove reverse blocking
+        reverse_blocked_key = self._get_blocked_users_key(blocked_user_id)
+        await self.redis.srem(reverse_blocked_key, user_id)
+        
+        return True
 

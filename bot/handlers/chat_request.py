@@ -105,88 +105,55 @@ async def process_chat_request_message(message: Message, state: FSMContext):
             await state.clear()
             return
         
-        # Generate profile_id if not exists
-        if not user.profile_id:
-            import hashlib
-            profile_id = hashlib.md5(f"user_{user.telegram_id}".encode()).hexdigest()[:12]
-            user.profile_id = profile_id
-            await db_session.commit()
-            await db_session.refresh(user)
+        # Check if user has premium
+        from db.crud import check_user_premium, get_user_points
+        user_premium = await check_user_premium(db_session, user.id)
         
-        # Send chat request notification to receiver
-        bot = Bot(token=settings.BOT_TOKEN)
-        try:
-            gender_map = {"male": "پسر 🧑", "female": "دختر 👩", "other": "سایر"}
-            gender_text = gender_map.get(user.gender, user.gender or "تعیین نشده")
-            
-            user_profile_id = f"/user_{user.profile_id}"
-            
-            # Build profile info text
-            profile_info = f"💬 درخواست چت جدید!\n\n"
-            profile_info += f"👤 از: {get_display_name(user)}\n"
-            profile_info += f"⚧️ جنسیت: {gender_text}\n"
-            
-            if user.age:
-                profile_info += f"🎂 سن: {user.age}\n"
-            if user.city:
-                profile_info += f"🏙️ شهر: {user.city}\n"
-            if user.province:
-                profile_info += f"🗺️ استان: {user.province}\n"
-            
-            profile_info += f"🆔 ID: {user_profile_id}\n\n"
-            profile_info += f"💬 پیام درخواست:\n{request_message}\n\n"
-            profile_info += "آیا می‌خواهید چت را شروع کنید؟"
-            
-            # Create keyboard
-            chat_request_keyboard = get_chat_request_keyboard(user.id, user.id)
-            
-            # Send message with photo if available
-            if user.profile_image_url:
-                try:
-                    await bot.send_photo(
-                        receiver.telegram_id,
-                        photo=user.profile_image_url,
-                        caption=profile_info,
-                        reply_markup=chat_request_keyboard
-                    )
-                except Exception:
-                    # If photo fails, send text only
-                    await bot.send_message(
-                        receiver.telegram_id,
-                        profile_info,
-                        reply_markup=chat_request_keyboard
-                    )
-            else:
-                await bot.send_message(
-                    receiver.telegram_id,
-                    profile_info,
-                    reply_markup=chat_request_keyboard
+        # If not premium, check if user has enough coins (1 coin for chat request)
+        if not user_premium:
+            user_points = await get_user_points(db_session, user.id)
+            if user_points < 1:
+                await message.answer(
+                    f"⚠️ سکه کافی نداری!\n\n"
+                    f"💰 برای ارسال درخواست چت به 1 سکه نیاز داری.\n"
+                    f"💎 سکه فعلی تو: {user_points}\n\n"
+                    f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی یا پریمیوم بگیری."
                 )
+                await state.clear()
+                return
             
-            await bot.session.close()
-        except Exception as e:
-            # If bot can't send message, inform user
-            await message.answer("❌ امکان ارسال درخواست چت وجود ندارد.")
-            await state.clear()
+            # Show confirmation with cost
+            from bot.keyboards.common import get_confirm_keyboard
+            await message.answer(
+                f"💬 درخواست چت\n\n"
+                f"📝 پیام شما:\n{request_message}\n\n"
+                f"📤 برای: {get_display_name(receiver)}\n\n"
+                f"💰 هزینه این درخواست: 1 سکه\n"
+                f"💎 سکه‌های فعلی تو: {user_points}\n\n"
+                f"آیا می‌خواهید این درخواست را ارسال کنید؟",
+                reply_markup=get_confirm_keyboard("chat_request:send")
+            )
+            
+            # Store message text and receiver_id in state
+            await state.update_data(chat_request_message=request_message)
+            await state.update_data(chat_request_receiver_id=receiver_id)
+            return
+        else:
+            # Premium user - show confirmation without cost
+            from bot.keyboards.common import get_confirm_keyboard
+            await message.answer(
+                f"💬 درخواست چت\n\n"
+                f"📝 پیام شما:\n{request_message}\n\n"
+                f"📤 برای: {get_display_name(receiver)}\n\n"
+                f"💎 این درخواست رایگان است (پریمیوم)\n\n"
+                f"آیا می‌خواهید این درخواست را ارسال کنید؟",
+                reply_markup=get_confirm_keyboard("chat_request:send")
+            )
+            
+            # Store message text and receiver_id in state
+            await state.update_data(chat_request_message=request_message)
+            await state.update_data(chat_request_receiver_id=receiver_id)
             break
-        
-        # Send confirmation message to requester with cancel button
-        cancel_keyboard = get_chat_request_cancel_keyboard(user.id, receiver.id)
-        await message.answer(
-            f"✅ درخواست چت شما برای {get_display_name(receiver)} ارسال شد.\n\n"
-            "⏳ منتظر پاسخ باشید...\n\n"
-            "💡 می‌تونی درخواست رو لغو کنی:",
-            reply_markup=cancel_keyboard
-        )
-        await state.clear()
-        
-        # Set pending request in Redis
-        await set_pending_chat_request(user.id, receiver.id)
-        
-        # Create timeout task - if no response after 2 minutes, notify requester
-        asyncio.create_task(check_chat_request_timeout(user.id, user.telegram_id, receiver.id, receiver.telegram_id))
-        
-        break
 
 
 async def check_chat_request_timeout(requester_id: int, requester_telegram_id: int, receiver_id: int, receiver_telegram_id: int):
@@ -232,6 +199,162 @@ async def check_chat_request_timeout(requester_id: int, requester_telegram_id: i
             except Exception:
                 pass
         break
+
+
+@router.callback_query(F.data == "chat_request:send:confirm")
+async def confirm_chat_request_send(callback: CallbackQuery, state: FSMContext):
+    """Confirm and send chat request with coin deduction."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            await state.clear()
+            return
+        
+        # Get state data
+        state_data = await state.get_data()
+        request_message = state_data.get("chat_request_message")
+        receiver_id = state_data.get("chat_request_receiver_id")
+        
+        if not request_message or not receiver_id:
+            await callback.answer("❌ اطلاعات یافت نشد.", show_alert=True)
+            await state.clear()
+            return
+        
+        receiver = await get_user_by_id(db_session, receiver_id)
+        if not receiver:
+            await callback.answer("❌ گیرنده یافت نشد.", show_alert=True)
+            await state.clear()
+            return
+        
+        # Check if user has premium
+        from db.crud import check_user_premium, get_user_points, spend_points
+        user_premium = await check_user_premium(db_session, user.id)
+        
+        # Deduct coin if not premium
+        if not user_premium:
+            user_points = await get_user_points(db_session, user.id)
+            if user_points < 1:
+                await callback.answer("❌ سکه کافی نداری!", show_alert=True)
+                await state.clear()
+                return
+            
+            # Deduct 1 coin
+            success = await spend_points(
+                db_session,
+                user.id,
+                1,
+                "spent",
+                "chat_request",
+                f"Cost for sending chat request to user {receiver.id}"
+            )
+            if not success:
+                await callback.answer("❌ خطا در کسر سکه.", show_alert=True)
+                await state.clear()
+                return
+        
+        # Generate profile_id if not exists
+        if not user.profile_id:
+            import hashlib
+            profile_id = hashlib.md5(f"user_{user.telegram_id}".encode()).hexdigest()[:12]
+            user.profile_id = profile_id
+            await db_session.commit()
+            await db_session.refresh(user)
+        
+        # Send chat request notification to receiver
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            gender_map = {"male": "پسر 🧑", "female": "دختر 👩", "other": "سایر"}
+            gender_text = gender_map.get(user.gender, user.gender or "تعیین نشده")
+            
+            user_profile_id = f"/user_{user.profile_id}"
+            
+            # Build profile info text
+            profile_info = f"💬 درخواست چت جدید!\n\n"
+            profile_info += f"👤 از: {get_display_name(user)}\n"
+            profile_info += f"⚧️ جنسیت: {gender_text}\n"
+            
+            if user.age:
+                profile_info += f"🎂 سن: {user.age}\n"
+            if user.city:
+                profile_info += f"🏙️ شهر: {user.city}\n"
+            if user.province:
+                profile_info += f"🗺️ استان: {user.province}\n"
+            
+            profile_info += f"🆔 ID: {user_profile_id}\n\n"
+            profile_info += f"💬 پیام درخواست:\n{request_message}\n\n"
+            profile_info += "آیا می‌خواهید چت را شروع کنید؟"
+            
+            # Create keyboard
+            from bot.keyboards.common import get_chat_request_keyboard
+            chat_request_keyboard = get_chat_request_keyboard(user.id, user.id)
+            
+            # Send message with photo if available
+            if user.profile_image_url:
+                try:
+                    await bot.send_photo(
+                        receiver.telegram_id,
+                        photo=user.profile_image_url,
+                        caption=profile_info,
+                        reply_markup=chat_request_keyboard
+                    )
+                except Exception:
+                    # If photo fails, send text only
+                    await bot.send_message(
+                        receiver.telegram_id,
+                        profile_info,
+                        reply_markup=chat_request_keyboard
+                    )
+            else:
+                await bot.send_message(
+                    receiver.telegram_id,
+                    profile_info,
+                    reply_markup=chat_request_keyboard
+                )
+            
+            await bot.session.close()
+        except Exception as e:
+            # If bot can't send message, inform user
+            await callback.answer("❌ امکان ارسال درخواست چت وجود ندارد.", show_alert=True)
+            await state.clear()
+            break
+        
+        # Send confirmation message to requester with cancel button
+        from bot.keyboards.common import get_chat_request_cancel_keyboard
+        cancel_keyboard = get_chat_request_cancel_keyboard(user.id, receiver.id)
+        
+        cost_text = "💎 این درخواست رایگان بود (پریمیوم)" if user_premium else "💰 1 سکه از حساب شما کسر شد"
+        
+        await callback.message.edit_text(
+            f"✅ درخواست چت شما برای {get_display_name(receiver)} ارسال شد.\n\n"
+            f"{cost_text}\n\n"
+            f"⏳ منتظر پاسخ باشید...\n\n"
+            f"💡 می‌تونی درخواست رو لغو کنی:",
+            reply_markup=cancel_keyboard
+        )
+        await callback.answer("✅ درخواست ارسال شد!")
+        await state.clear()
+        
+        # Set pending request in Redis
+        await set_pending_chat_request(user.id, receiver.id)
+        
+        # Create timeout task - if no response after 2 minutes, notify requester
+        asyncio.create_task(check_chat_request_timeout(user.id, user.telegram_id, receiver.id, receiver.telegram_id))
+        
+        break
+
+
+@router.callback_query(F.data == "chat_request:send:cancel")
+async def cancel_chat_request_send(callback: CallbackQuery, state: FSMContext):
+    """Cancel chat request sending."""
+    await callback.message.edit_text(
+        "❌ ارسال درخواست چت لغو شد.",
+        reply_markup=None
+    )
+    await callback.answer("❌ ارسال لغو شد")
+    await state.clear()
 
 
 @router.callback_query(F.data.startswith("chat_request:accept:"))
@@ -401,6 +524,11 @@ async def reject_chat_request(callback: CallbackQuery):
         
         # Remove pending request from Redis
         await remove_pending_chat_request(requester.id, user.id)
+        
+        # Add requester to user's blocked list to prevent re-matching
+        from bot.handlers.chat import matchmaking_queue
+        if matchmaking_queue:
+            await matchmaking_queue.add_blocked_user(user.telegram_id, requester.telegram_id)
         
         # Remove keyboard from message (if possible)
         try:

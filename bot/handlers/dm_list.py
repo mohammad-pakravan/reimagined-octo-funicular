@@ -238,11 +238,31 @@ async def process_dm_reply(message: Message, state: FSMContext):
             await state.clear()
             return
         
-        # Show confirmation
+        # Check if user has premium
+        from db.crud import check_user_premium, get_user_points
+        user_premium = await check_user_premium(db_session, user.id)
+        
+        # Show confirmation with cost info
+        if user_premium:
+            cost_text = "💎 این پیام رایگان است (پریمیوم)"
+        else:
+            user_points = await get_user_points(db_session, user.id)
+            if user_points < 1:
+                await message.answer(
+                    f"⚠️ سکه کافی نداری!\n\n"
+                    f"💰 برای ارسال پاسخ به 1 سکه نیاز داری.\n"
+                    f"💎 سکه فعلی تو: {user_points}\n\n"
+                    f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی یا پریمیوم بگیری."
+                )
+                await state.clear()
+                return
+            cost_text = f"💰 هزینه این پیام: 1 سکه\n💎 سکه‌های فعلی تو: {user_points}"
+        
         await message.answer(
             f"✉️ پاسخ به پیام دایرکت\n\n"
             f"📝 پاسخ شما:\n{reply_text}\n\n"
             f"📤 برای: {get_display_name(sender)}\n\n"
+            f"{cost_text}\n\n"
             f"آیا می‌خواهید این پاسخ را ارسال کنید؟",
             reply_markup=get_dm_confirm_keyboard(sender_id)
         )
@@ -279,6 +299,32 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
         
         if not reply_text:
             await callback.answer("❌ پاسخ یافت نشد.", show_alert=True)
+            await state.clear()
+            return
+        
+        # Check if user has premium
+        from db.crud import check_user_premium, get_user_points, spend_points
+        user_premium = await check_user_premium(db_session, user.id)
+        
+        # Deduct coin if not premium
+        if not user_premium:
+            user_points = await get_user_points(db_session, user.id)
+            if user_points < 1:
+                await callback.answer("❌ سکه کافی نداری!", show_alert=True)
+                await state.clear()
+                return
+            
+            # Deduct 1 coin
+            success = await spend_points(
+                db_session,
+                user.id,
+                1,
+                "spent",
+                "direct_message_reply",
+                f"Cost for replying to direct message from user {sender.id}"
+            )
+            if not success:
+                await callback.answer("❌ خطا در کسر سکه.", show_alert=True)
             await state.clear()
             return
         
@@ -322,8 +368,11 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             # If bot can't send message, still save the message
             pass
         
+        cost_text = "💎 این پیام رایگان بود (پریمیوم)" if user_premium else "💰 1 سکه از حساب شما کسر شد"
+        
         await callback.message.edit_text(
-            "✅ پاسخ شما با موفقیت ارسال شد!\n\n"
+            f"✅ پاسخ شما با موفقیت ارسال شد!\n\n"
+            f"{cost_text}\n\n"
             f"پاسخ شما برای {get_display_name(sender)} ارسال شد.",
             reply_markup=None
         )

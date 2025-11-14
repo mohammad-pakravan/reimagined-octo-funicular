@@ -6,6 +6,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
 
 from db.database import get_db
 from db.crud import get_user_by_telegram_id, get_payment_transaction_by_transaction_id, check_user_premium, get_premium_plan_by_id, get_active_mandatory_channels
@@ -93,7 +94,7 @@ async def check_payment_status(message: Message, transaction_id: str):
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
     """Handle /start command."""
     user_id = message.from_user.id
     username = message.from_user.username
@@ -177,6 +178,28 @@ async def cmd_start(message: Message):
                 reply_markup=get_gender_keyboard()
             )
         else:
+            # Existing user - check if province is missing
+            # Check both None and empty string
+            if not user.province or (isinstance(user.province, str) and user.province.strip() == ""):
+                # Clear any existing state first
+                await state.clear()
+                
+                await message.answer(
+                    "👋 خوش برگشتید!\n\n"
+                    "💡 برای تجربه کاربری بهتر و پیدا کردن هم‌چت‌های نزدیک‌تر، لطفاً استان خود را وارد کنید.\n\n"
+                    "از چه استانی هستید؟\n"
+                    "لطفاً نام استان خود را بفرستید:"
+                )
+                # Set state to wait for province
+                from bot.handlers.registration import RegistrationStates
+                await state.set_state(RegistrationStates.waiting_province)
+                # Store that this is an existing user updating province
+                from bot.handlers.registration import registration_data
+                if user_id not in registration_data:
+                    registration_data[user_id] = {}
+                registration_data[user_id]["updating_province"] = True
+                break
+            
             # Existing user - check for referral links
             if start_param and start_param.startswith("admin_"):
                 # Admin referral link - just record click

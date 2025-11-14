@@ -305,6 +305,50 @@ def get_chat_request_keyboard(request_id: int, requester_id: int) -> InlineKeybo
     return keyboard
 
 
+def get_user_search_keyboard(user) -> InlineKeyboardMarkup:
+    """
+    Get keyboard for user search options.
+    
+    Args:
+        user: Current user object
+    """
+    keyboard = []
+    
+    # City search (only if user has city)
+    if user.city:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🏙️ هم شهری‌ها",
+                switch_inline_query_current_chat=f"search:city:{user.city}"
+            )
+        ])
+    
+    # Province search (only if user has province)
+    if user.province:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🗺️ هم استانی‌ها",
+                switch_inline_query_current_chat=f"search:province:{user.province}"
+            )
+        ])
+    
+    # Gender searches
+    keyboard.append([
+        InlineKeyboardButton(
+            text="👩 دخترها",
+            switch_inline_query_current_chat="search:gender:female"
+        )
+    ])
+    keyboard.append([
+        InlineKeyboardButton(
+            text="👨 پسرها",
+            switch_inline_query_current_chat="search:gender:male"
+        )
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 def get_chat_request_cancel_keyboard(requester_id: int, receiver_id: int) -> InlineKeyboardMarkup:
     """
     Get keyboard for canceling chat request (for requester).

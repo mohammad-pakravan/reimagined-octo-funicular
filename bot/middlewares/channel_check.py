@@ -44,6 +44,9 @@ class ChannelCheckMiddleware(BaseMiddleware):
                 return await handler(event, data)
             user_id = event.from_user.id
         elif isinstance(event, Message):
+            # Skip check for /start command (needed for registration and province update)
+            if event.text and event.text.startswith("/start"):
+                return await handler(event, data)
             user_id = event.from_user.id
         
         if user_id:

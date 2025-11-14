@@ -252,14 +252,13 @@ async def partner_profile_button(message: Message):
             break
         
         # Get like, follow, block status
-        from db.crud import is_liked, is_following, is_blocked, get_chat_end_notifications_for_user, check_user_premium
+        from db.crud import is_liked, is_following, is_blocked, is_chat_end_notification_active, check_user_premium
         is_liked_status = await is_liked(db_session, user.id, partner.id)
         is_following_status = await is_following(db_session, user.id, partner.id)
         is_blocked_status = await is_blocked(db_session, user.id, partner.id)
         
-        # Get notification status
-        notifications = await get_chat_end_notifications_for_user(db_session, user.id)
-        is_notifying_status = any(n.watched_user_id == partner.id for n in notifications) if notifications else False
+        # Get notification status - check if user is watching partner for chat end
+        is_notifying_status = await is_chat_end_notification_active(db_session, user.id, partner.id)
         
         # Check partner premium status
         partner_premium = await check_user_premium(db_session, partner.id)

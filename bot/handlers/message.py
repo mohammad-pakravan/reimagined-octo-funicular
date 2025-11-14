@@ -286,9 +286,11 @@ async def forward_message(message: Message, state: FSMContext):
     if current_state in [
         RegistrationStates.waiting_age,
         RegistrationStates.waiting_city,
+        RegistrationStates.waiting_province,
+        RegistrationStates.waiting_display_name,
         RegistrationStates.waiting_photo,
         RegistrationStates.waiting_gender
-    ] or current_state == "dm:waiting_message":
+    ] or current_state == "dm:waiting_message" or current_state == "dm:waiting_reply":
         return  # Let registration or DM handlers process the message
     
     if not chat_manager:
@@ -312,6 +314,10 @@ async def forward_message(message: Message, state: FSMContext):
         
         if not user:
             return
+        
+        # Skip check for "🔍 جستجوی کاربران" button - it doesn't require active chat
+        if message.text == "🔍 جستجوی کاربران":
+            return  # Let reply handler process it
         
         # Check if user has active chat
         # Skip check for admin users

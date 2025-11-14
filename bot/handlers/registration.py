@@ -28,6 +28,7 @@ class RegistrationStates(StatesGroup):
     waiting_gender = State()
     waiting_age = State()
     waiting_city = State()
+    waiting_province = State()
     waiting_display_name = State()
     waiting_photo = State()
     waiting_username = State()
@@ -117,6 +118,58 @@ async def process_city(message: Message, state: FSMContext):
     if user_id not in registration_data:
         registration_data[user_id] = {}
     registration_data[user_id]["city"] = city
+    
+    await message.answer(
+        "عالی! از چه استانی هستی؟\n"
+        "لطفاً نام استان خودت را بفرست:",
+        reply_markup=remove_keyboard()
+    )
+    await state.set_state(RegistrationStates.waiting_province)
+
+
+@router.message(StateFilter(RegistrationStates.waiting_province))
+async def process_province(message: Message, state: FSMContext):
+    """Process province input."""
+    province = message.text.strip()
+    user_id = message.from_user.id
+    
+    # Validate province (similar to city validation)
+    if not province or len(province) < 2:
+        await message.answer("❌ نام استان باید حداقل 2 کاراکتر باشد.\n\nلطفاً دوباره نام استان خودت را بفرست:")
+        return
+    
+    if len(province) > 100:
+        await message.answer("❌ نام استان نمی‌تواند بیشتر از 100 کاراکتر باشد.\n\nلطفاً دوباره نام استان خودت را بفرست:")
+        return
+    
+    # Store province
+    if user_id not in registration_data:
+        registration_data[user_id] = {}
+    registration_data[user_id]["province"] = province
+    
+    # Check if this is an existing user just updating province
+    is_updating_province = registration_data[user_id].get("updating_province", False)
+    
+    if is_updating_province:
+        # Update province for existing user
+        async for db_session in get_db():
+            await update_user_profile(
+                db_session,
+                user_id,
+                province=province
+            )
+            break
+        
+        # Clear registration data
+        registration_data.pop(user_id, None)
+        
+        await message.answer(
+            "✅ استان شما با موفقیت ثبت شد!\n\n"
+            "💡 حالا می‌توانید از امکانات کامل ربات استفاده کنید.",
+            reply_markup=get_main_reply_keyboard()
+        )
+        await state.clear()
+        return
     
     await message.answer(
         "عالی! حالا یک نام نمایشی برای خودت انتخاب کن:\n"
@@ -239,6 +292,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                 gender=user_data.get("gender"),
                 age=user_data.get("age"),
                 city=user_data.get("city"),
+                province=user_data.get("province"),
                 profile_image_url=user_data.get("profile_image_url"),
             )
         else:
@@ -251,6 +305,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                 gender=user_data.get("gender"),
                 age=user_data.get("age"),
                 city=user_data.get("city"),
+                province=user_data.get("province"),
                 profile_image_url=user_data.get("profile_image_url"),
             )
         

@@ -265,109 +265,40 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                         await chat_manager.set_chat_cost_deducted(chat_room.id, user2.id, True)
                         user2_points -= chat_cost
             
-            # Prepare messages with beautiful UI
-            user1_msg = (
-                "✅ هم‌چت پیدا شد!\n\n"
-                "🎉 شما الان به هم متصل شدید!\n"
-                "💬 می‌تونید شروع به چت کنید.\n\n"
-            )
+            # Helper function to generate cost summary for match found
+            def get_match_cost_summary(is_premium, pref_gender, coins_deducted, chat_cost, points):
+                if is_premium:
+                    return "💰 هزینه: رایگان (پریمیوم)"
+                elif pref_gender is None:
+                    return "💰 هزینه: رایگان (همه)"
+                elif coins_deducted:
+                    return f"💰 {chat_cost} سکه کسر شد (باقی‌مانده: {points})"
+                else:
+                    return f"⚠️ سکه کافی نداشتی ({chat_cost} سکه نیاز داری)"
             
-            user2_msg = (
-                "✅ هم‌چت پیدا شد!\n\n"
-                "🎉 شما الان به هم متصل شدید!\n"
-                "💬 می‌تونید شروع به چت کنید.\n\n"
-            )
-            
-            # Add cost information
             # Log for debugging - IMPORTANT: log the actual values
             logger.info(f"User {user1_telegram_id} - premium: {user1_premium}, pref_gender: {user1_pref_gender}, coins_deducted: {user1_coins_deducted}, points: {user1_points}")
             logger.info(f"User {user1_telegram_id} - pref_gender_raw was: {user1_pref_gender_raw}, normalized to: {user1_pref_gender}")
             
-            if user1_premium:
-                user1_msg += (
-                    "💎 وضعیت: پریمیوم\n"
-                    "💰 هزینه این چت: رایگان\n\n"
-                )
-            elif user1_pref_gender is None:
-                # "all" was selected - no coins deducted
-                user1_msg += (
-                    "💰 هزینه این چت: رایگان\n"
-                    "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نمی‌شه.\n\n"
-                )
-            elif user1_coins_deducted:
-                # Specific gender selected and coins were deducted
-                # Get required message count from system settings
-                required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
-                try:
-                    required_message_count = int(required_message_count_str)
-                except (ValueError, TypeError):
-                    required_message_count = 2
-                
-                user1_msg += (
-                    f"💰 هزینه این چت: {chat_cost} سکه\n"
-                    f"💎 سکه‌های باقی‌مانده: {user1_points}\n\n"
-                    f"💡 نکته: اگر چت موفقیت‌آمیز باشه (هر دو طرف حداقل {required_message_count} پیام بفرستن)، این سکه کسر می‌مونه.\n"
-                    f"در غیر این صورت، سکه‌ها بهت برمی‌گرده.\n\n"
-                    f"💎 با خرید پریمیوم:\n"
-                    f"• هزینه چت: رایگان\n"
-                    f"• نفر اول صف\n"
-                    f"• امکانات بیشتر\n\n"
-                )
-            else:
-                # Specific gender selected but coins weren't deducted (probably didn't have enough coins)
-                user1_msg += (
-                    f"⚠️ سکه کافی نداشتی!\n"
-                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
-                    f"💎 سکه فعلی تو: {user1_points}\n\n"
-                    f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی!\n\n"
-                    f"💎 با خرید پریمیوم:\n"
-                    f"• هزینه چت: رایگان\n"
-                    f"• نفر اول صف\n"
-                    f"• امکانات بیشتر\n\n"
-                )
+            # Prepare messages with beautiful UI
+            user1_cost_summary = get_match_cost_summary(
+                user1_premium, user1_pref_gender, user1_coins_deducted, chat_cost, user1_points
+            )
+            user2_cost_summary = get_match_cost_summary(
+                user2_premium, user2_pref_gender, user2_coins_deducted, chat_cost, user2_points
+            )
             
-            if user2_premium:
-                user2_msg += (
-                    "💎 وضعیت: پریمیوم\n"
-                    "💰 هزینه این چت: رایگان\n\n"
-                )
-            elif user2_pref_gender is None:
-                # "all" was selected - no coins deducted
-                user2_msg += (
-                    "💰 هزینه این چت: رایگان\n"
-                    "🌐 چون «همه» رو انتخاب کردی، هیچ سکه‌ای کسر نمی‌شه.\n\n"
-                )
-            elif user2_coins_deducted:
-                # Specific gender selected and coins were deducted
-                # Get required message count from system settings
-                required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
-                try:
-                    required_message_count = int(required_message_count_str)
-                except (ValueError, TypeError):
-                    required_message_count = 2
-                
-                user2_msg += (
-                    f"💰 هزینه این چت: {chat_cost} سکه\n"
-                    f"💎 سکه‌های باقی‌مانده: {user2_points}\n\n"
-                    f"💡 نکته: اگر چت موفقیت‌آمیز باشه (هر دو طرف حداقل {required_message_count} پیام بفرستن)، این سکه کسر می‌مونه.\n"
-                    f"در غیر این صورت، سکه‌ها بهت برمی‌گرده.\n\n"
-                    f"💎 با خرید پریمیوم:\n"
-                    f"• هزینه چت: رایگان\n"
-                    f"• نفر اول صف\n"
-                    f"• امکانات بیشتر\n\n"
-                )
-            else:
-                # Specific gender selected but coins weren't deducted (probably didn't have enough coins)
-                user2_msg += (
-                    f"⚠️ سکه کافی نداشتی!\n"
-                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
-                    f"💎 سکه فعلی تو: {user2_points}\n\n"
-                    f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی!\n\n"
-                    f"💎 با خرید پریمیوم:\n"
-                    f"• هزینه چت: رایگان\n"
-                    f"• نفر اول صف\n"
-                    f"• امکانات بیشتر\n\n"
-                )
+            user1_msg = (
+                "✅ هم‌چت پیدا شد!\n\n"
+                f"{user1_cost_summary}\n\n"
+                "💬 می‌تونید شروع به چت کنید."
+            )
+            
+            user2_msg = (
+                "✅ هم‌چت پیدا شد!\n\n"
+                f"{user2_cost_summary}\n\n"
+                "💬 می‌تونید شروع به چت کنید."
+            )
             
             
             await bot_instance.send_message(

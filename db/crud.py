@@ -40,6 +40,59 @@ async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int, inclu
     return result.scalar_one_or_none()
 
 
+async def search_users(
+    session: AsyncSession,
+    city: Optional[str] = None,
+    province: Optional[str] = None,
+    gender: Optional[str] = None,
+    exclude_user_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0
+) -> List[User]:
+    """
+    Search users by filters.
+    
+    Args:
+        session: Database session
+        city: Filter by city
+        province: Filter by province
+        gender: Filter by gender ('male', 'female', 'other')
+        exclude_user_id: User ID to exclude from results
+        limit: Maximum number of results
+        offset: Number of results to skip
+        
+    Returns:
+        List of User objects
+    """
+    query = select(User).where(
+        User.is_active == True,
+        User.is_banned == False
+    )
+    
+    if city:
+        query = query.where(User.city == city)
+    
+    if province:
+        query = query.where(User.province == province)
+    
+    if gender:
+        query = query.where(User.gender == gender)
+    
+    if exclude_user_id:
+        query = query.where(User.id != exclude_user_id)
+    
+    # Only return users with complete profile (gender, age, city)
+    query = query.where(
+        User.gender.isnot(None),
+        User.age.isnot(None),
+        User.city.isnot(None)
+    )
+    
+    query = query.order_by(User.created_at.desc()).offset(offset).limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
 async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
     """Get user by internal ID."""
     result = await session.execute(select(User).where(User.id == user_id))
@@ -2399,6 +2452,7 @@ async def get_top_users_by_points(
         UserPoints.user_id,
         UserPoints.points,
         User.id,
+        User.display_name,
         User.username,
         User.telegram_id,
         User.profile_id,
@@ -2431,9 +2485,10 @@ async def get_top_users_by_points(
     
     leaderboard = []
     for idx, row in enumerate(result.all(), 1):
-        user_id, points, user_db_id, username, telegram_id, profile_id, gender = row
-        display_name = username or f"User {telegram_id}"
-        leaderboard.append((user_id, points, idx, display_name, profile_id, gender))
+        user_id, points, user_db_id, display_name, username, telegram_id, profile_id, gender = row
+        # Use display_name if available, otherwise fall back to username, then telegram_id
+        final_display_name = display_name or username or f"User {telegram_id}"
+        leaderboard.append((user_id, points, idx, final_display_name, profile_id, gender))
     
     return leaderboard
 
@@ -2460,6 +2515,7 @@ async def get_top_users_by_referrals(
         referral_counts.c.referrer_id,
         referral_counts.c.count,
         User.id,
+        User.display_name,
         User.username,
         User.telegram_id,
         User.profile_id,
@@ -2485,6 +2541,7 @@ async def get_top_users_by_referrals(
             referral_counts.c.referrer_id,
             referral_counts.c.count,
             User.id,
+            User.display_name,
             User.username,
             User.telegram_id,
             User.profile_id,
@@ -2501,9 +2558,10 @@ async def get_top_users_by_referrals(
     
     leaderboard = []
     for idx, row in enumerate(result.all(), 1):
-        user_id, count, user_db_id, username, telegram_id, profile_id, gender = row
-        display_name = username or f"User {telegram_id}"
-        leaderboard.append((user_id, count, idx, display_name, profile_id, gender))
+        user_id, count, user_db_id, display_name, username, telegram_id, profile_id, gender = row
+        # Use display_name if available, otherwise fall back to username, then telegram_id
+        final_display_name = display_name or username or f"User {telegram_id}"
+        leaderboard.append((user_id, count, idx, final_display_name, profile_id, gender))
     
     return leaderboard
 
@@ -2530,6 +2588,7 @@ async def get_top_users_by_likes(
         like_counts.c.liked_user_id,
         like_counts.c.count,
         User.id,
+        User.display_name,
         User.username,
         User.telegram_id,
         User.profile_id,
@@ -2555,6 +2614,7 @@ async def get_top_users_by_likes(
             like_counts.c.liked_user_id,
             like_counts.c.count,
             User.id,
+            User.display_name,
             User.username,
             User.telegram_id,
             User.profile_id,
@@ -2571,9 +2631,10 @@ async def get_top_users_by_likes(
     
     leaderboard = []
     for idx, row in enumerate(result.all(), 1):
-        user_id, count, user_db_id, username, telegram_id, profile_id, gender = row
-        display_name = username or f"User {telegram_id}"
-        leaderboard.append((user_id, count, idx, display_name, profile_id, gender))
+        user_id, count, user_db_id, display_name, username, telegram_id, profile_id, gender = row
+        # Use display_name if available, otherwise fall back to username, then telegram_id
+        final_display_name = display_name or username or f"User {telegram_id}"
+        leaderboard.append((user_id, count, idx, final_display_name, profile_id, gender))
     
     return leaderboard
 

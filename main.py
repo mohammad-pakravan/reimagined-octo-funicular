@@ -153,6 +153,9 @@ async def setup_bot():
     reply.set_chat_manager(chat_manager)
     profile.set_chat_manager(chat_manager)
     anonymous_call.set_redis_client(redis_client)
+    # Set chat manager for game handler
+    from bot.handlers.game import set_chat_manager as set_game_chat_manager
+    set_game_chat_manager(chat_manager)
     chat_request.set_redis_client(redis_client)
     
     # Set Redis client in API
@@ -185,6 +188,8 @@ async def setup_bot():
     dp.include_router(mandatory_channels.router)  # Mandatory channels handlers
     dp.include_router(profile.router)  # Profile interaction handlers
     dp.include_router(my_profile.router)  # My profile edit and management
+    import bot.handlers.user_search as user_search
+    dp.include_router(user_search.router)  # User search handlers (must be before message handler for inline queries)
     dp.include_router(dm_list.router)  # Direct message list handlers (must be before direct_message for reply handling)
     dp.include_router(direct_message.router)  # Direct message handlers
     dp.include_router(chat_request.router)  # Chat request handlers
@@ -206,6 +211,8 @@ async def setup_bot():
     dp.include_router(reply.router)  # Reply keyboard handlers
     import bot.handlers.help as help_handler
     dp.include_router(help_handler.router)  # Help menu handlers
+    import bot.handlers.game as game
+    dp.include_router(game.router)  # Game handlers (must be before message handler for dice/dart)
     dp.include_router(message.router)  # Message handler should be last
     
     # Set chat manager for handlers
