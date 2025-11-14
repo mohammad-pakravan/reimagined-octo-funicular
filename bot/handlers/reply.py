@@ -69,6 +69,27 @@ async def start_chat_button(message: Message, state: FSMContext):
         break
 
 
+@router.message(F.text == "🔍 جستجوی کاربران")
+async def search_users_button(message: Message):
+    """Handle 'Search Users' reply button."""
+    user_id = message.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await message.answer("❌ لطفاً ابتدا پروفایل خودت را کامل کن. /start را بزنید.")
+            return
+        
+        # Show search options keyboard
+        from bot.keyboards.common import get_user_search_keyboard
+        await message.answer(
+            "🔍 جستجوی کاربران\n\n"
+            "بر چه اساس می‌خواهی جستجو کنی؟",
+            reply_markup=get_user_search_keyboard(user)
+        )
+        break
+
+
 @router.message(F.text == "📊 پروفایل من")
 async def my_profile_button(message: Message):
     """Handle 'My Profile' reply button."""
