@@ -779,8 +779,8 @@ async def _process_dice_message_from_send(sent_message: Message, user_db_id: int
                     }
                     game_emoji = emoji_map.get(dice_emoji, "🎯")
                     
-                    # Wait for dice animation to complete (2-3 seconds)
-                    await asyncio.sleep(2.5)
+                    # Wait for dice animation to complete (3 seconds)
+                    await asyncio.sleep(3.0)
                     
                     dice_text = f"{game_emoji} امتیاز حریف: {value}"
                     if partner_dice_value is not None:
@@ -969,8 +969,8 @@ async def _process_dice_message(message: Message, is_edited: bool = False):
                         }
                         game_emoji = emoji_map.get(dice_emoji, "🎯")
                         
-                        # Wait for dice animation to complete (2-3 seconds)
-                        await asyncio.sleep(2.5)
+                        # Wait for dice animation to complete (3 seconds)
+                        await asyncio.sleep(3.0)
                         
                         dice_text = f"{game_emoji} امتیاز حریف: {value}"
                         if partner_dice_value is not None:
@@ -1067,17 +1067,35 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
                 initiator_final_points = await get_user_points(db_session, initiator.id)
                 partner_final_points = await get_user_points(db_session, partner.id)
                 
+                # Get chat room to check private mode status
+                chat_room = None
+                if chat_room_id:
+                    from db.crud import get_chat_room_by_id
+                    chat_room = await get_chat_room_by_id(db_session, chat_room_id)
+                else:
+                    from db.crud import get_active_chat_room_by_user
+                    chat_room = await get_active_chat_room_by_user(db_session, initiator.id)
+                
+                # Get private mode status from Redis via chat_manager
+                initiator_private_mode = False
+                partner_private_mode = False
+                if chat_room and chat_manager:
+                    initiator_private_mode = await chat_manager.get_private_mode(chat_room.id, initiator.id)
+                    partner_private_mode = await chat_manager.get_private_mode(chat_room.id, partner.id)
+                
                 await bot.send_message(
                     active_game["initiator_telegram_id"],
                     f"🎉 برنده شدی!\n\n"
                     f"💰 {total_winnings} سکه برنده شدی!\n"
-                    f"💎 سکه‌های شما: {initiator_final_points}"
+                    f"💎 سکه‌های شما: {initiator_final_points}",
+                    reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
                 )
                 await bot.send_message(
                     active_game["partner_telegram_id"],
                     f"😔 باختی!\n\n"
                     f"💰 {coin_amount} سکه از دست دادی.\n"
-                    f"💎 سکه‌های شما: {partner_final_points}"
+                    f"💎 سکه‌های شما: {partner_final_points}",
+                    reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
                 )
             elif winner_id == active_game["partner_id"]:
                 # Partner wins
@@ -1093,17 +1111,35 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
                 initiator_final_points = await get_user_points(db_session, initiator.id)
                 partner_final_points = await get_user_points(db_session, partner.id)
                 
+                # Get chat room to check private mode status
+                chat_room = None
+                if chat_room_id:
+                    from db.crud import get_chat_room_by_id
+                    chat_room = await get_chat_room_by_id(db_session, chat_room_id)
+                else:
+                    from db.crud import get_active_chat_room_by_user
+                    chat_room = await get_active_chat_room_by_user(db_session, initiator.id)
+                
+                # Get private mode status from Redis via chat_manager
+                initiator_private_mode = False
+                partner_private_mode = False
+                if chat_room and chat_manager:
+                    initiator_private_mode = await chat_manager.get_private_mode(chat_room.id, initiator.id)
+                    partner_private_mode = await chat_manager.get_private_mode(chat_room.id, partner.id)
+                
                 await bot.send_message(
                     active_game["partner_telegram_id"],
                     f"🎉 برنده شدی!\n\n"
                     f"💰 {total_winnings} سکه برنده شدی!\n"
-                    f"💎 سکه‌های شما: {partner_final_points}"
+                    f"💎 سکه‌های شما: {partner_final_points}",
+                    reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
                 )
                 await bot.send_message(
                     active_game["initiator_telegram_id"],
                     f"😔 باختی!\n\n"
                     f"💰 {coin_amount} سکه از دست دادی.\n"
-                    f"💎 سکه‌های شما: {initiator_final_points}"
+                    f"💎 سکه‌های شما: {initiator_final_points}",
+                    reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
                 )
             else:
                 # Draw
@@ -1128,17 +1164,35 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
                 initiator_final_points = await get_user_points(db_session, initiator.id)
                 partner_final_points = await get_user_points(db_session, partner.id)
                 
+                # Get chat room to check private mode status
+                chat_room = None
+                if chat_room_id:
+                    from db.crud import get_chat_room_by_id
+                    chat_room = await get_chat_room_by_id(db_session, chat_room_id)
+                else:
+                    from db.crud import get_active_chat_room_by_user
+                    chat_room = await get_active_chat_room_by_user(db_session, initiator.id)
+                
+                # Get private mode status from Redis via chat_manager
+                initiator_private_mode = False
+                partner_private_mode = False
+                if chat_room and chat_manager:
+                    initiator_private_mode = await chat_manager.get_private_mode(chat_room.id, initiator.id)
+                    partner_private_mode = await chat_manager.get_private_mode(chat_room.id, partner.id)
+                
                 await bot.send_message(
                     active_game["initiator_telegram_id"],
                     f"🤝 مساوی شد!\n\n"
                     f"💰 سکه‌های شما برگشت داده شد.\n"
-                    f"💎 سکه‌های شما: {initiator_final_points}"
+                    f"💎 سکه‌های شما: {initiator_final_points}",
+                    reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
                 )
                 await bot.send_message(
                     active_game["partner_telegram_id"],
                     f"🤝 مساوی شد!\n\n"
                     f"💰 سکه‌های شما برگشت داده شد.\n"
-                    f"💎 سکه‌های شما: {partner_final_points}"
+                    f"💎 سکه‌های شما: {partner_final_points}",
+                    reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
                 )
         except Exception as e:
             logger.error(f"Error in game result: {e}", exc_info=True)
@@ -1159,42 +1213,8 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
                 await delete_user_game_emoji(chat_room.id, active_game["initiator_id"])
                 await delete_user_game_emoji(chat_room.id, active_game["partner_id"])
         
-        # Restore chat keyboard for both users (they're still in chat)
-        from bot.keyboards.reply import get_chat_reply_keyboard
-        bot = Bot(token=settings.BOT_TOKEN)
-        try:
-            # Get chat room to check private mode status
-            chat_room = None
-            if chat_room_id:
-                from db.crud import get_chat_room_by_id
-                chat_room = await get_chat_room_by_id(db_session, chat_room_id)
-            else:
-                from db.crud import get_active_chat_room_by_user
-                chat_room = await get_active_chat_room_by_user(db_session, initiator.id)
-            
-            # Get private mode status from Redis via chat_manager
-            initiator_private_mode = False
-            partner_private_mode = False
-            if chat_room and chat_manager:
-                initiator_private_mode = await chat_manager.get_private_mode(chat_room.id, initiator.id)
-                partner_private_mode = await chat_manager.get_private_mode(chat_room.id, partner.id)
-            
-            # Restore chat keyboard without sending extra message
-            # Use a minimal text to update keyboard
-            await bot.send_message(
-                active_game["initiator_telegram_id"],
-                " ",
-                reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
-            )
-            await bot.send_message(
-                active_game["partner_telegram_id"],
-                " ",
-                reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
-            )
-        except Exception as e:
-            logger.error(f"Error restoring chat keyboard after game: {e}", exc_info=True)
-        finally:
-            await bot.session.close()
+        # Keyboard is already restored in the result messages above
+        # No need to send additional message
 
 
 @router.message(F.dice)
