@@ -1156,15 +1156,31 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
         from bot.keyboards.reply import get_chat_reply_keyboard
         bot = Bot(token=settings.BOT_TOKEN)
         try:
+            # Get chat room to check private mode status
+            chat_room = None
+            if chat_room_id:
+                from db.crud import get_chat_room_by_id
+                chat_room = await get_chat_room_by_id(db_session, chat_room_id)
+            else:
+                from db.crud import get_active_chat_room_by_user
+                chat_room = await get_active_chat_room_by_user(db_session, initiator.id)
+            
+            # Get private mode status from Redis via chat_manager
+            initiator_private_mode = False
+            partner_private_mode = False
+            if chat_room and chat_manager:
+                initiator_private_mode = await chat_manager.get_private_mode(chat_room.id, initiator.id)
+                partner_private_mode = await chat_manager.get_private_mode(chat_room.id, partner.id)
+            
             await bot.send_message(
                 active_game["initiator_telegram_id"],
-                " ",
-                reply_markup=get_chat_reply_keyboard()
+                "✅ بازی تمام شد",
+                reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
             )
             await bot.send_message(
                 active_game["partner_telegram_id"],
-                " ",
-                reply_markup=get_chat_reply_keyboard()
+                "✅ بازی تمام شد",
+                reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
             )
         except Exception as e:
             logger.error(f"Error restoring chat keyboard after game: {e}", exc_info=True)
