@@ -3,6 +3,7 @@ Game handlers for chat games with coin betting.
 Games: Dice (تاس) and Dart (دارت)
 """
 import json
+import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -778,6 +779,9 @@ async def _process_dice_message_from_send(sent_message: Message, user_db_id: int
                     }
                     game_emoji = emoji_map.get(dice_emoji, "🎯")
                     
+                    # Wait for dice animation to complete (2-3 seconds)
+                    await asyncio.sleep(2.5)
+                    
                     dice_text = f"{game_emoji} امتیاز حریف: {value}"
                     if partner_dice_value is not None:
                         dice_text = f"{game_emoji} امتیاز شما: {partner_dice_value}\n{dice_text}"
@@ -964,6 +968,9 @@ async def _process_dice_message(message: Message, is_edited: bool = False):
                             "🎰": "🎰"
                         }
                         game_emoji = emoji_map.get(dice_emoji, "🎯")
+                        
+                        # Wait for dice animation to complete (2-3 seconds)
+                        await asyncio.sleep(2.5)
                         
                         dice_text = f"{game_emoji} امتیاز حریف: {value}"
                         if partner_dice_value is not None:
@@ -1172,14 +1179,16 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
                 initiator_private_mode = await chat_manager.get_private_mode(chat_room.id, initiator.id)
                 partner_private_mode = await chat_manager.get_private_mode(chat_room.id, partner.id)
             
+            # Restore chat keyboard without sending extra message
+            # Use a minimal text to update keyboard
             await bot.send_message(
                 active_game["initiator_telegram_id"],
-                "✅ بازی تمام شد",
+                " ",
                 reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
             )
             await bot.send_message(
                 active_game["partner_telegram_id"],
-                "✅ بازی تمام شد",
+                " ",
                 reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
             )
         except Exception as e:
