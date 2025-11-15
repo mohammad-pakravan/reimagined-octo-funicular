@@ -186,11 +186,28 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         
         cost_summary = get_search_cost_summary()
         
-        queue_status_text = (
-            f"🔍 در حال جستجو...\n\n"
-            f"{cost_summary}\n\n"
-            f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
-        )
+        # Build queue status message
+        if not user_premium:
+            # For non-premium users, show premium features
+            queue_status_text = (
+                f"🔍 در حال جستجو...\n\n"
+                f"{cost_summary}\n\n"
+                f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم...\n\n"
+                f"💎✨ با پریمیوم تجربه بهتری داشته باش! ✨💎\n\n"
+                f"🎁 ویژگی‌های پریمیوم:\n"
+                f"✅ چت نامحدود بدون سکه و رایگان\n"
+                f"✅ درخواست تماس  نامحدود و رایگان\n"
+                f"✅ پیام دایرکت  نامحدود و رایگان\n"
+                f"✅ اولویت در صف (نفر اول صف)\n\n"
+                f"🚀💎 همین الان پریمیوم بخر و اول صف باش! 💎🚀"
+            )
+        else:
+            # For premium users, show simple message
+            queue_status_text = (
+                f"🔍 در حال جستجو...\n\n"
+                f"{cost_summary}\n\n"
+                f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
+            )
         
         await callback.message.edit_text(
             queue_status_text,

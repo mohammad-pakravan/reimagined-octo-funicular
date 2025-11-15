@@ -17,7 +17,8 @@ services:
     image: mysql:8.0
     container_name: telecaht_mysql
     ports:
-      - "14088:3306"
+      - "3306:3306"
+      # - "14095:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-telecaht}
@@ -37,8 +38,8 @@ services:
     command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
 
   phpmyadmin:
-    # image: phpmyadmin/phpmyadmin:latest
-    image: linuxserver/phpmyadmin:latest
+    image: phpmyadmin/phpmyadmin:latest
+    # image: linuxserver/phpmyadmin:latest
     container_name: telecaht_phpmyadmin
     ports:
       - "8080:80"
@@ -49,6 +50,11 @@ services:
       PMA_PASSWORD: ${MYSQL_PASSWORD:-telecaht_pass}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       UPLOAD_LIMIT: 300M
+      # phpMyAdmin authentication (HTTP Basic Auth)
+      PMA_CONTROLUSER: ${PHPMYADMIN_USER:-mpak1913}
+      PMA_CONTROLPASS: ${PHPMYADMIN_PASSWORD:-@mpak1913}
+      # Enable authentication
+      PMA_ARBITRARY: 0
     depends_on:
       - mysql
     restart: unless-stopped
