@@ -3,7 +3,7 @@ Premium handler for the bot.
 Handles premium subscription information and purchase flow.
 """
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, LabeledPrice, PreCheckoutQuery, SuccessfulPayment
+from aiogram.types import Message, CallbackQuery, LabeledPrice, PreCheckoutQuery, SuccessfulPayment, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 import requests
 import logging
@@ -648,15 +648,19 @@ async def process_shaparak_payment(
     except Exception:
         bot_username = "asdasdczaxcqeqwbot"  # Fallback to provided username
     
+    # Create inline button for payment link (transparent/inline button)
+    payment_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 پرداخت آنلاین", url=payment_link)]
+    ])
+    
     try:
         await callback.message.edit_text(
             f"💳 پرداخت با زرین‌پال\n\n"
             f"💎 پلن: {plan.plan_name}\n"
             f"💰 مبلغ: {int(plan.price):,} تومان\n\n"
-            f"🔗 برای پرداخت روی لینک زیر کلیک کنید:\n\n"
-            f"{payment_link}\n\n"
+            f"⚠️🔒 قبل از اقدام برای پرداخت، فیلترشکن خودتون رو خاموش کنید! 🔒⚠️\n\n"
             f"💡 پس از پرداخت، می‌توانید از طریق لینک بازگشت به ربات برگردید.",
-            reply_markup=None
+            reply_markup=payment_keyboard
         )
     except Exception:
         # If edit fails (e.g., message not modified), send new message
@@ -664,10 +668,9 @@ async def process_shaparak_payment(
             f"💳 پرداخت با زرین‌پال\n\n"
             f"💎 پلن: {plan.plan_name}\n"
             f"💰 مبلغ: {int(plan.price):,} تومان\n\n"
-            f"🔗 برای پرداخت روی لینک زیر کلیک کنید:\n\n"
-            f"{payment_link}\n\n"
+            f"⚠️🔒 قبل از اقدام برای پرداخت، فیلترشکن خودتون رو خاموش کنید! 🔒⚠️\n\n"
             f"💡 پس از پرداخت، می‌توانید از طریق لینک بازگشت به ربات برگردید.",
-            reply_markup=None
+            reply_markup=payment_keyboard
         )
     
     await callback.answer("✅ لینک پرداخت برای شما نمایش داده شد.", show_alert=True)
