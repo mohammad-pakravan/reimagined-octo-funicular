@@ -314,32 +314,43 @@ def get_user_search_keyboard(user) -> InlineKeyboardMarkup:
     """
     keyboard = []
     
-    # City search (only if user has city)
+    # Row 1: Online girls and boys
+    # keyboard.append([
+    #     InlineKeyboardButton(
+    #         text="🟢 دخترهای آنلاین",
+    #         switch_inline_query_current_chat="search:online:female"
+    #     ),
+    #     InlineKeyboardButton(
+    #         text="🟢 پسرهای آنلاین",
+    #         switch_inline_query_current_chat="search:online:male"
+    #     )
+    # ])
+    
+    # Row 2: Same city and province (only if user has city/province)
+    row2 = []
     if user.city:
-        keyboard.append([
+        row2.append(
             InlineKeyboardButton(
                 text="🏙️ هم شهری‌ها",
                 switch_inline_query_current_chat=f"search:city:{user.city}"
             )
-        ])
-    
-    # Province search (only if user has province)
+        )
     if user.province:
-        keyboard.append([
+        row2.append(
             InlineKeyboardButton(
                 text="🗺️ هم استانی‌ها",
                 switch_inline_query_current_chat=f"search:province:{user.province}"
             )
-        ])
+        )
+    if row2:
+        keyboard.append(row2)
     
-    # Gender searches
+    # Row 3: All girls and boys
     keyboard.append([
         InlineKeyboardButton(
             text="👩 دخترها",
             switch_inline_query_current_chat="search:gender:female"
-        )
-    ])
-    keyboard.append([
+        ),
         InlineKeyboardButton(
             text="👨 پسرها",
             switch_inline_query_current_chat="search:gender:male"

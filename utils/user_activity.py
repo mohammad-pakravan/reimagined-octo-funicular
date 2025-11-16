@@ -13,19 +13,38 @@ class UserActivityTracker:
     def __init__(self, redis_client: redis.Redis):
         self.redis = redis_client
         self.activity_prefix = "user:activity"
-        self.online_timeout_seconds = 300  # 5 minutes considered online
+        self.online_timeout_seconds = 60  # 1 minute considered online
     
     def _get_activity_key(self, telegram_id: int) -> str:
         """Get Redis key for user activity."""
         return f"{self.activity_prefix}:{telegram_id}"
     
-    async def update_activity(self, telegram_id: int):
-        """Update user's last activity timestamp."""
+    async def update_activity(self, telegram_id: int, db_session=None):
+        """
+        Update user's last activity timestamp.
+        
+        Args:
+            telegram_id: User's Telegram ID
+            db_session: Optional database session to update last_seen in database
+        """
         key = self._get_activity_key(telegram_id)
-        timestamp = datetime.utcnow().timestamp()
+        now = datetime.utcnow()
+        timestamp = now.timestamp()
         # Store as string since Redis decode_responses=False
         try:
             await self.redis.setex(key, self.online_timeout_seconds, str(timestamp))
+            
+            # Update last_seen in database if session provided
+            if db_session:
+                try:
+                    from db.crud import get_user_by_telegram_id
+                    user = await get_user_by_telegram_id(db_session, telegram_id)
+                    if user:
+                        user.last_seen = now
+                        await db_session.commit()
+                except Exception as db_error:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Error updating last_seen in database for user {telegram_id}: {db_error}")
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Error updating activity in Redis for user {telegram_id}: {e}")
@@ -56,6 +75,42 @@ class UserActivityTracker:
         return None
 
 
+async def get_user_status(telegram_id: int, activity_tracker: Optional[UserActivityTracker] = None, db_session=None) -> tuple[bool, Optional[datetime]]:
+    """
+    Get user's online status and last seen time.
+    
+    Args:
+        telegram_id: User's Telegram ID
+        activity_tracker: Optional UserActivityTracker instance
+        db_session: Optional database session to get last_seen from database
+    
+    Returns:
+        Tuple of (is_online: bool, last_seen: Optional[datetime])
+    """
+    # First check Redis for real-time status
+    if activity_tracker:
+        is_online = await activity_tracker.is_online(telegram_id)
+        if is_online:
+            last_activity = await activity_tracker.get_last_activity(telegram_id)
+            return True, last_activity
+    
+    # If not online in Redis, check database
+    if db_session:
+        try:
+            from db.crud import get_user_by_telegram_id
+            user = await get_user_by_telegram_id(db_session, telegram_id)
+            if user and user.last_seen:
+                # Check if last_seen is within 1 minute
+                now = datetime.utcnow()
+                time_diff = (now - user.last_seen).total_seconds()
+                is_online = time_diff < 60
+                return is_online, user.last_seen
+        except Exception:
+            pass
+    
+    return False, None
+
+
 def format_last_seen(last_activity: Optional[datetime]) -> str:
     """
     Format last seen time in Persian.
@@ -72,8 +127,8 @@ def format_last_seen(last_activity: Optional[datetime]) -> str:
     now = datetime.utcnow()
     time_diff = now - last_activity
     
-    # If within 5 minutes, consider online
-    if time_diff.total_seconds() < 300:
+    # If within 1 minute, consider online
+    if time_diff.total_seconds() < 60:
         return "🟢 آنلاین"
     
     # Format time difference in Persian

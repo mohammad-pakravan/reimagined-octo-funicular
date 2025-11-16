@@ -45,9 +45,11 @@ async def search_users(
     city: Optional[str] = None,
     province: Optional[str] = None,
     gender: Optional[str] = None,
+    online_only: bool = False,
     exclude_user_id: Optional[int] = None,
     limit: int = 50,
-    offset: int = 0
+    offset: int = 0,
+    activity_tracker=None
 ) -> List[User]:
     """
     Search users by filters.
@@ -57,9 +59,11 @@ async def search_users(
         city: Filter by city
         province: Filter by province
         gender: Filter by gender ('male', 'female', 'other')
+        online_only: If True, only return online users
         exclude_user_id: User ID to exclude from results
         limit: Maximum number of results
         offset: Number of results to skip
+        activity_tracker: Optional UserActivityTracker instance for checking online status
         
     Returns:
         List of User objects
@@ -88,9 +92,61 @@ async def search_users(
         User.city.isnot(None)
     )
     
-    query = query.order_by(User.created_at.desc()).offset(offset).limit(limit)
-    result = await session.execute(query)
-    return list(result.scalars().all())
+    # If online_only, we need to filter after getting results from DB
+    # because online status is in Redis, not DB
+    if online_only:
+        if not activity_tracker:
+            # If activity_tracker is not available, return empty list
+            return []
+        
+        # For online search, we need to fetch more users and filter
+        # offset represents how many online users to skip (for pagination)
+        online_users = []
+        skipped_online = 0  # Count of online users we've skipped
+        current_db_offset = 0  # Database offset
+        max_fetch = 1000  # Maximum users to check from DB
+        fetched_count = 0
+        
+        while len(online_users) < limit and fetched_count < max_fetch:
+            # Fetch a batch of users from database
+            batch_size = min(limit * 5, max_fetch - fetched_count)  # Fetch 5x more to find online users
+            query_batch = query.order_by(User.created_at.desc()).offset(current_db_offset).limit(batch_size)
+            result = await session.execute(query_batch)
+            batch_users = list(result.scalars().all())
+            
+            if not batch_users:
+                break  # No more users to check
+            
+            # Check each user's online status
+            for user in batch_users:
+                if await activity_tracker.is_online(user.telegram_id):
+                    # Skip if we haven't reached the offset yet
+                    if skipped_online < offset:
+                        skipped_online += 1
+                        continue
+                    
+                    # Add to results
+                    online_users.append(user)
+                    if len(online_users) >= limit:
+                        break
+            
+            # If we found enough online users, break
+            if len(online_users) >= limit:
+                break
+            
+            fetched_count += len(batch_users)
+            current_db_offset += batch_size
+            
+            # If we got fewer users than batch_size, we've reached the end
+            if len(batch_users) < batch_size:
+                break
+        
+        return online_users
+    else:
+        # Normal search - no online filter
+        query = query.order_by(User.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(query)
+        return list(result.scalars().all())
 
 
 async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:

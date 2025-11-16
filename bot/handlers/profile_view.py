@@ -83,12 +83,19 @@ async def view_user_profile(message: Message):
             else:
                 distance = "شهرهای مختلف"
         
+        # Get user status (online/offline)
+        from utils.user_activity import get_user_status, format_last_seen
+        from main import activity_tracker
+        is_online, last_seen = await get_user_status(profile_user.telegram_id, activity_tracker, db_session)
+        status_text = format_last_seen(last_seen if last_seen else profile_user.last_seen)
+        
         profile_text = (
             f"• نام: {get_display_name(profile_user)}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {profile_user.province or 'تعیین نشده'}\n"
             f"• شهر: {profile_user.city or 'تعیین نشده'}\n"
             f"• سن: {profile_user.age or 'تعیین نشده'}\n"
+            f"• وضعیت: {status_text}\n"
             f"ID: {user_unique_id}\n"
             f"فاصله : {distance}"
         )
@@ -224,12 +231,19 @@ async def view_user_profile_regex(message: Message):
             else:
                 distance = "شهرهای مختلف"
         
+        # Get user status (online/offline)
+        from utils.user_activity import get_user_status, format_last_seen
+        from main import activity_tracker
+        is_online, last_seen = await get_user_status(profile_user.telegram_id, activity_tracker, db_session)
+        status_text = format_last_seen(last_seen if last_seen else profile_user.last_seen)
+        
         profile_text = (
             f"• نام: {get_display_name(profile_user)}\n"
             f"• جنسیت: {gender_text}\n"
             f"• استان: {profile_user.province or 'تعیین نشده'}\n"
             f"• شهر: {profile_user.city or 'تعیین نشده'}\n"
             f"• سن: {profile_user.age or 'تعیین نشده'}\n"
+            f"• وضعیت: {status_text}\n"
             f"ID: {user_unique_id}\n"
             f"فاصله : {distance}"
         )

@@ -9,6 +9,8 @@ from config.settings import settings
 from db.database import get_db
 from db.crud import get_user_by_telegram_id, search_users, is_blocked
 from utils.validators import get_display_name
+from utils.user_activity import get_user_status, format_last_seen
+from main import activity_tracker
 
 router = Router()
 
@@ -20,13 +22,13 @@ async def handle_user_search(inline_query: InlineQuery):
     query = inline_query.query
     
     # Parse search query: search:type:value
-    # Examples: search:city:تهران, search:province:تهران, search:gender:female
+    # Examples: search:city:تهران, search:province:تهران, search:gender:female, search:online:female
     parts = query.split(":", 2)
     if len(parts) < 3:
         await inline_query.answer(results=[], cache_time=1)
         return
     
-    search_type = parts[1]  # city, province, or gender
+    search_type = parts[1]  # city, province, gender, or online
     search_value = parts[2] if len(parts) > 2 else ""
     
     # Get offset from inline_query.offset (Telegram's built-in pagination)
@@ -47,6 +49,7 @@ async def handle_user_search(inline_query: InlineQuery):
         city = None
         province = None
         gender = None
+        online_only = False
         
         if search_type == "city":
             city = search_value
@@ -54,7 +57,9 @@ async def handle_user_search(inline_query: InlineQuery):
             province = search_value
         elif search_type == "gender":
             gender = search_value
-        
+        elif search_type == "online":
+            online_only = True
+            gender = search_value  # online:female or online:male
         
         # Search users
         users = await search_users(
@@ -62,9 +67,11 @@ async def handle_user_search(inline_query: InlineQuery):
             city=city,
             province=province,
             gender=gender,
+            online_only=online_only,
             exclude_user_id=user.id,
             limit=50,
-            offset=offset
+            offset=offset,
+            activity_tracker=activity_tracker
         )
         
         if not users:
@@ -111,8 +118,12 @@ async def handle_user_search(inline_query: InlineQuery):
                 except Exception:
                     thumbnail_url = None
             
+            # Get user status (online/offline)
+            is_online, last_seen = await get_user_status(found_user.telegram_id, activity_tracker, db_session)
+            status_text = format_last_seen(last_seen if last_seen else found_user.last_seen)
+            
             # Build description
-            gender_map = {"male": "👨 پسر", "female": "👩 دختر", "other": "سایر"}
+            gender_map = {"male": "👨 ", "female": "👩 ", "other": "سایر"}
             gender_text = gender_map.get(found_user.gender, found_user.gender or "نامشخص")
             description_parts = [gender_text]
             
@@ -120,15 +131,17 @@ async def handle_user_search(inline_query: InlineQuery):
                 description_parts.append(f"{found_user.age} سال")
             if found_user.city:
                 description_parts.append(found_user.city)
-            if found_user.province:
-                description_parts.append(found_user.province)
+
             
-            description = " • ".join(description_parts)
+            # Add online status
+            description_parts.append(status_text)
+            
+            description = " - ".join(description_parts)
             
             results.append(
                 InlineQueryResultArticle(
                     id=f"{found_user.id}_{offset}",
-                    title=f"👤 {display_name_text[:30]}",
+                    title=f"🚀 {display_name_text[:30]}",
                     description=description[:50],
                     thumbnail_url=thumbnail_url,
                     input_message_content=InputTextMessageContent(

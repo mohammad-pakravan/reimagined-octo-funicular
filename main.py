@@ -5,6 +5,7 @@ Initializes bot, database, Redis, handlers, and FastAPI server.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
@@ -19,6 +20,8 @@ from db.database import init_db, close_db, get_db
 from core.matchmaking import MatchmakingQueue
 from core.chat_manager import ChatManager
 from utils.rate_limiter import MessageRateLimiter
+from utils.user_activity import UserActivityTracker
+from bot.middlewares.activity_tracker import ActivityTrackerMiddleware
 
 # Import handlers
 from bot.handlers import start, registration, chat, message, premium, admin, reply, profile
@@ -55,6 +58,7 @@ redis_client = None
 matchmaking_queue = None
 chat_manager = None
 rate_limiter = None
+activity_tracker = None
 
 
 async def setup_redis():
@@ -124,6 +128,19 @@ async def setup_rate_limiter():
     return rate_limiter
 
 
+async def setup_activity_tracker():
+    """Setup activity tracker."""
+    global activity_tracker, redis_client
+    
+    if not redis_client:
+        redis_client = await setup_redis()
+    
+    activity_tracker = UserActivityTracker(redis_client)
+    logger.info("✅ Activity tracker initialized")
+    
+    return activity_tracker
+
+
 async def setup_bot():
     """Setup and configure the Telegram bot."""
     # Initialize bot
@@ -144,6 +161,7 @@ async def setup_bot():
     await setup_matchmaking()
     await setup_chat_manager()
     await setup_rate_limiter()
+    await setup_activity_tracker()
     
     # Set instances in handlers
     chat.set_matchmaking_queue(matchmaking_queue)
@@ -169,11 +187,17 @@ async def setup_bot():
     # Start matchmaking worker in background
     asyncio.create_task(run_matchmaking_worker())
     
+    # Start activity checker worker in background
+    asyncio.create_task(run_activity_checker())
+    
     # Register middlewares
     dp.message.middleware(RateLimitMiddleware(rate_limiter))
     dp.callback_query.middleware(RateLimitMiddleware(rate_limiter))
     dp.message.middleware(ChannelCheckMiddleware())
     dp.callback_query.middleware(ChannelCheckMiddleware())
+    # Activity tracker middleware (should be early to track all activity)
+    dp.message.middleware(ActivityTrackerMiddleware(activity_tracker))
+    dp.callback_query.middleware(ActivityTrackerMiddleware(activity_tracker))
     
     # Register routers (handlers)
     # Order matters! Registration should come before message handler
@@ -225,6 +249,73 @@ async def setup_bot():
     return bot, dp
 
 
+async def run_activity_checker():
+    """Background task to check and mark users as offline after 1 minute of inactivity."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    while True:
+        try:
+            await asyncio.sleep(30)  # Check every 30 seconds
+            
+            if not activity_tracker or not redis_client:
+                continue
+            
+            # Get all activity keys from Redis
+            pattern = f"{activity_tracker.activity_prefix}:*"
+            keys = []
+            async for key in redis_client.scan_iter(match=pattern):
+                if isinstance(key, bytes):
+                    key = key.decode('utf-8')
+                keys.append(key)
+            
+            # Check each key
+            now = datetime.utcnow()
+            for key in keys:
+                try:
+                    # Get timestamp from Redis
+                    timestamp_str = await redis_client.get(key)
+                    if not timestamp_str:
+                        continue
+                    
+                    if isinstance(timestamp_str, bytes):
+                        timestamp_str = timestamp_str.decode('utf-8')
+                    
+                    timestamp = float(timestamp_str)
+                    last_activity = datetime.utcfromtimestamp(timestamp)
+                    time_diff = (now - last_activity).total_seconds()
+                    
+                    # If more than 1 minute, user is offline (key will expire automatically)
+                    # But we should update last_seen in database
+                    if time_diff > 60:
+                        # Extract telegram_id from key
+                        telegram_id_str = key.split(":")[-1]
+                        telegram_id = int(telegram_id_str)
+                        
+                        # Update last_seen in database
+                        try:
+                            async for db_session in get_db():
+                                try:
+                                    from db.crud import get_user_by_telegram_id
+                                    user = await get_user_by_telegram_id(db_session, telegram_id)
+                                    if user:
+                                        user.last_seen = last_activity
+                                        await db_session.commit()
+                                except Exception as db_error:
+                                    logger.warning(f"Error updating last_seen for user {telegram_id}: {db_error}")
+                                    await db_session.rollback()
+                                break
+                        except Exception as db_error:
+                            logger.warning(f"Error getting DB session for user {telegram_id}: {db_error}")
+                except Exception as e:
+                    logger.warning(f"Error processing activity key {key}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error in activity checker: {e}", exc_info=True)
+            await asyncio.sleep(60)  # Wait longer on error
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for FastAPI app."""
@@ -237,6 +328,16 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Database initialized")
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
+    
+    # Run migrations
+    try:
+        from db.database import run_migration
+        import os
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_last_seen.sql")
+        await run_migration(migration_file)
+        logger.info("✅ Migrations completed")
+    except Exception as e:
+        logger.error(f"❌ Failed to run migrations: {e}")
     
     # Setup Redis
     await setup_redis()

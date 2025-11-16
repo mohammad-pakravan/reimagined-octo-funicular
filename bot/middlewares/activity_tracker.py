@@ -60,11 +60,23 @@ class ActivityTrackerMiddleware(BaseMiddleware):
         # Update activity if user ID found
         if user_id:
             try:
-                await self.activity_tracker.update_activity(user_id)
+                # Get database session for updating last_seen
+                from db.database import get_db
+                async for db_session in get_db():
+                    try:
+                        await self.activity_tracker.update_activity(user_id, db_session)
+                    finally:
+                        await db_session.close()
+                    break
             except Exception as e:
-                # Log but don't fail
+                # Log but don't fail - try without database
                 import logging
-                logging.getLogger(__name__).error(f"Error updating activity for user {user_id}: {e}")
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Error updating activity with DB for user {user_id}: {e}, trying without DB")
+                try:
+                    await self.activity_tracker.update_activity(user_id, None)
+                except Exception as e2:
+                    logger.error(f"Error updating activity for user {user_id}: {e2}")
         
         # Continue to handler
         return await handler(event, data)

@@ -40,6 +40,7 @@ class User(Base):
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_seen = Column(DateTime, nullable=True)  # آخرین بازدید کاربر
     
     # Relationships
     chat_rooms_user1 = relationship("ChatRoom", foreign_keys="ChatRoom.user1_id", back_populates="user1")
