@@ -134,7 +134,7 @@ async def handle_user_search(inline_query: InlineQuery):
 
             
             # Add online status
-            description_parts.append(status_text)
+            # description_parts.append(status_text)
             
             description = " - ".join(description_parts)
             
