@@ -585,6 +585,9 @@ class InMemoryMatchmakingQueue:
         - Girls with explicit preferred_gender ('male'/'female'): follow that,
           still respecting the boy-boy priority for 'male'.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         entry = self._user_data.get(user_id)
         if not entry:
             return None
@@ -646,8 +649,6 @@ class InMemoryMatchmakingQueue:
 
         # Boys: prefer boy-boy, then boy-girl
         if gender == "male":
-            import logging
-            logger = logging.getLogger(__name__)
             logger.debug(f"Boy {user_id} looking for match. Boys in queue: {len(self._boys_queue)}, Girls in queue: {len(self._girls_queue)}, preferred_gender: {preferred_gender}")
             
             # If user explicitly wants a girl (paid/premium), match directly without probability
