@@ -16,15 +16,56 @@ def get_gender_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
-def get_preferred_gender_keyboard() -> InlineKeyboardMarkup:
-    """Get keyboard for preferred gender selection."""
+def get_preferred_gender_keyboard(same_age_enabled: bool = True) -> InlineKeyboardMarkup:
+    """Get keyboard for preferred gender selection (main menu).
+    
+    Args:
+        same_age_enabled: Whether same age filter is currently enabled
+    """
+    same_age_text = "✅ فیلتر همسن: فعال" if same_age_enabled else "❌ فیلتر همسن: غیرفعال"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👨 آقا", callback_data="pref_gender:male"),
-            InlineKeyboardButton(text="👩 خانم", callback_data="pref_gender:female"),
+            InlineKeyboardButton(text="🎲 جستجوی شانسی", callback_data="pref_gender:all"),
         ],
         [
-            InlineKeyboardButton(text="🌐 همه", callback_data="pref_gender:all"),
+            InlineKeyboardButton(text="👨 حتما پسر باشه", callback_data="pref_gender:male"),
+            InlineKeyboardButton(text="👩 حتما دختر باشه", callback_data="pref_gender:female"),
+        ],
+        [
+            InlineKeyboardButton(text="🗺️ هم‌استانی‌ام باشه", callback_data="chat:filter_province"),
+            InlineKeyboardButton(text="🏙️ همشهری‌ام باشه", callback_data="chat:filter_city"),
+        ],
+        [
+            InlineKeyboardButton(text=same_age_text, callback_data="chat:toggle_same_age"),
+        ],
+    ])
+    return keyboard
+
+
+def get_chat_filters_keyboard(same_age_enabled: bool = True) -> InlineKeyboardMarkup:
+    """Get keyboard for chat filter selection with same_age toggle."""
+    same_age_text = "✅ فیلتر همسن: فعال" if same_age_enabled else "❌ فیلتر همسن: غیرفعال"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=same_age_text, callback_data="chat:toggle_same_age"),
+        ],
+    ])
+    return keyboard
+
+
+def get_city_province_gender_keyboard(filter_type: str) -> InlineKeyboardMarkup:
+    """Get keyboard for gender selection after choosing city/province filter.
+    
+    Args:
+        filter_type: 'city' or 'province'
+    """
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🎲 جستجوی شانسی", callback_data=f"chat_filter:{filter_type}:all"),
+        ],
+        [
+            InlineKeyboardButton(text="👨 حتما پسر باشه", callback_data=f"chat_filter:{filter_type}:male"),
+            InlineKeyboardButton(text="👩 حتما دختر باشه", callback_data=f"chat_filter:{filter_type}:female"),
         ],
     ])
     return keyboard
@@ -308,54 +349,47 @@ def get_chat_request_keyboard(request_id: int, requester_id: int) -> InlineKeybo
 def get_user_search_keyboard(user) -> InlineKeyboardMarkup:
     """
     Get keyboard for user search options.
+    Each button is in its own row to make them appear larger.
     
     Args:
         user: Current user object
     """
     keyboard = []
     
-    # Row 1: Online girls and boys
-    # keyboard.append([
-    #     InlineKeyboardButton(
-    #         text="🟢 دخترهای آنلاین",
-    #         switch_inline_query_current_chat="search:online:female"
-    #     ),
-    #     InlineKeyboardButton(
-    #         text="🟢 پسرهای آنلاین",
-    #         switch_inline_query_current_chat="search:online:male"
-    #     )
-    # ])
-    
-    # Row 2: Same city and province (only if user has city/province)
-    row2 = []
-    if user.city:
-        row2.append(
-            InlineKeyboardButton(
-                text="🏙️ هم شهری‌ها",
-                switch_inline_query_current_chat=f"search:city:{user.city}"
-            )
-        )
-    if user.province:
-        row2.append(
-            InlineKeyboardButton(
-                text="🗺️ هم استانی‌ها",
-                switch_inline_query_current_chat=f"search:province:{user.province}"
-            )
-        )
-    if row2:
-        keyboard.append(row2)
-    
-    # Row 3: All girls and boys
+    # Each button in its own row for larger appearance
+    # Row 1: All girls
     keyboard.append([
         InlineKeyboardButton(
             text="👩 دخترها",
             switch_inline_query_current_chat="search:gender:female"
-        ),
+        )
+    ])
+    
+    # Row 2: All boys
+    keyboard.append([
         InlineKeyboardButton(
             text="👨 پسرها",
             switch_inline_query_current_chat="search:gender:male"
         )
     ])
+    
+    # Row 3: Same city (only if user has city)
+    if user.city:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🏙️ هم شهری‌ها",
+                switch_inline_query_current_chat=f"search:city:{user.city}"
+            )
+        ])
+    
+    # Row 4: Same province (only if user has province)
+    if user.province:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🗺️ هم استانی‌ها",
+                switch_inline_query_current_chat=f"search:province:{user.province}"
+            )
+        ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

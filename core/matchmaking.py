@@ -1,10 +1,16 @@
 """
 Redis-based matchmaking system for anonymous chat.
 Handles user queues, matching, and queue count tracking.
+
+Also provides an in-memory implementation for low-traffic setups where
+we want extremely fast matching without depending on Redis for the queue.
 """
 import json
+import random
 import time
+from dataclasses import dataclass
 from typing import Optional, Dict, List
+
 import redis.asyncio as redis
 
 from config.settings import settings
@@ -60,6 +66,7 @@ class MatchmakingQueue:
         min_age: Optional[int] = None,
         max_age: Optional[int] = None,
         preferred_city: Optional[str] = None,
+        is_premium: bool = False,
     ) -> bool:
         """
         Add user to matchmaking queue.
@@ -73,6 +80,7 @@ class MatchmakingQueue:
             min_age: Minimum preferred age
             max_age: Maximum preferred age
             preferred_city: Preferred partner city
+            is_premium: Whether user has premium subscription
             
         Returns:
             True if added successfully
@@ -88,6 +96,7 @@ class MatchmakingQueue:
             "max_age": max_age,
             "preferred_city": preferred_city,
             "joined_at": time.time(),
+            "is_premium": is_premium,
         }
         
         user_data_key = self._get_user_data_key(user_id)
@@ -332,6 +341,27 @@ class MatchmakingQueue:
         async for _ in self.redis.scan_iter(match=pattern):
             count += 1
         return count
+
+    async def get_all_user_ids(self) -> List[int]:
+        """
+        Get all user IDs currently present in the matchmaking queue.
+        This is a helper for the matchmaking worker so it doesn't have to
+        know about Redis internals.
+        """
+        pattern = f"{self.user_data_prefix}:*"
+        user_ids: List[int] = []
+        async for key in self.redis.scan_iter(match=pattern):
+            if isinstance(key, bytes):
+                key_str = key.decode()
+            else:
+                key_str = str(key)
+            candidate_id_str = key_str.split(":")[-1]
+            try:
+                candidate_id = int(candidate_id_str)
+            except ValueError:
+                continue
+            user_ids.append(candidate_id)
+        return user_ids
     
     async def is_user_in_queue(self, user_id: int) -> bool:
         """
@@ -428,5 +458,343 @@ class MatchmakingQueue:
         reverse_blocked_key = self._get_blocked_users_key(blocked_user_id)
         await self.redis.srem(reverse_blocked_key, user_id)
         
+        return True
+
+
+@dataclass
+class UserQueueEntry:
+    """In-memory representation of a user waiting in the matchmaking queue."""
+    telegram_id: int
+    gender: Optional[str]
+    city: Optional[str]
+    age: Optional[int]
+    preferred_gender: Optional[str]
+    joined_at: float
+    # Filter preferences
+    filter_same_age: bool = False  # Match with users within ±3 years
+    filter_same_city: bool = False  # Match with users from same city
+    filter_same_province: bool = False  # Match with users from same province
+    province: Optional[str] = None  # User's province for filtering
+    is_premium: bool = False  # Whether user has premium subscription
+
+
+class InMemoryMatchmakingQueue:
+    """
+    In-memory matchmaking queue system.
+
+    Designed for low-traffic setups: keeps two simple lists (boys/girls) in memory
+    and uses the database to enforce the 7-hour no-rematch rule.
+    """
+
+    def __init__(self) -> None:
+        # telegram_id -> UserQueueEntry
+        self._user_data: Dict[int, UserQueueEntry] = {}
+        # Queues by gender (telegram IDs, order preserved)
+        self._boys_queue: List[int] = []
+        self._girls_queue: List[int] = []
+
+    async def add_user_to_queue(
+        self,
+        user_id: int,
+        gender: Optional[str] = None,
+        city: Optional[str] = None,
+        age: Optional[int] = None,
+        preferred_gender: Optional[str] = None,
+        min_age: Optional[int] = None,  # kept for API compatibility, not used
+        max_age: Optional[int] = None,  # kept for API compatibility, not used
+        preferred_city: Optional[str] = None,  # kept for API compatibility, not used
+        filter_same_age: bool = False,
+        filter_same_city: bool = False,
+        filter_same_province: bool = False,
+        province: Optional[str] = None,
+        is_premium: bool = False,
+    ) -> bool:
+        """Add user to in-memory matchmaking queue."""
+        # Normalize gender to simple strings
+        gender_norm = gender or "other"
+
+        entry = UserQueueEntry(
+            telegram_id=user_id,
+            gender=gender_norm,
+            city=city,
+            age=age,
+            preferred_gender=preferred_gender,
+            joined_at=time.time(),
+            filter_same_age=filter_same_age,
+            filter_same_city=filter_same_city,
+            filter_same_province=filter_same_province,
+            province=province,
+            is_premium=is_premium,
+        )
+
+        self._user_data[user_id] = entry
+
+        if gender_norm == "male":
+            if user_id not in self._boys_queue:
+                self._boys_queue.append(user_id)
+        elif gender_norm == "female":
+            if user_id not in self._girls_queue:
+                self._girls_queue.append(user_id)
+        else:
+            # For "other" or unknown genders, just append to girls queue as a fallback
+            if user_id not in self._girls_queue:
+                self._girls_queue.append(user_id)
+
+        return True
+
+    async def remove_user_from_queue(self, user_id: int) -> bool:
+        """Remove user from in-memory queues and data."""
+        self._user_data.pop(user_id, None)
+        if user_id in self._boys_queue:
+            self._boys_queue.remove(user_id)
+        if user_id in self._girls_queue:
+            self._girls_queue.remove(user_id)
+        return True
+
+    async def get_user_data(self, user_id: int) -> Optional[Dict]:
+        """Return user matchmaking data in dict form (compatible with Redis version)."""
+        entry = self._user_data.get(user_id)
+        if not entry:
+            return None
+
+        return {
+            "user_id": entry.telegram_id,
+            "gender": entry.gender,
+            "city": entry.city,
+            "age": entry.age,
+            "preferred_gender": entry.preferred_gender,
+            "min_age": None,
+            "max_age": None,
+            "preferred_city": None,
+            "joined_at": entry.joined_at,
+        }
+
+    async def _exists_boy_boy_pair(self) -> bool:
+        """Check if there is at least one potential boy-boy pair in queue."""
+        boys = [uid for uid in self._boys_queue if uid in self._user_data]
+        return len(boys) >= 2
+
+    async def find_match(self, user_id: int) -> Optional[int]:
+        """
+        Find a match for a user using in-memory queues and DB-based 7-hour rule.
+
+        Rules:
+        - Boys: try boy-boy first; if none, boy-girl.
+        - Girls (random / preferred_gender is None): only match to boys when
+          there is no boy-boy pair available.
+        - Girls with explicit preferred_gender ('male'/'female'): follow that,
+          still respecting the boy-boy priority for 'male'.
+        """
+        entry = self._user_data.get(user_id)
+        if not entry:
+            return None
+
+        gender = entry.gender or "other"
+        preferred_gender = entry.preferred_gender
+
+        # Helper to check if candidate matches filters
+        def matches_filters(user_entry: UserQueueEntry, candidate_entry: UserQueueEntry) -> bool:
+            """Check if candidate matches user's filter preferences."""
+            # Check same age filter (±3 years)
+            if user_entry.filter_same_age and user_entry.age and candidate_entry.age:
+                age_diff = abs(user_entry.age - candidate_entry.age)
+                if age_diff > 3:
+                    return False
+            
+            # Check same city filter
+            if user_entry.filter_same_city:
+                if not user_entry.city or not candidate_entry.city:
+                    return False
+                if user_entry.city != candidate_entry.city:
+                    return False
+            
+            # Check same province filter
+            if user_entry.filter_same_province:
+                if not user_entry.province or not candidate_entry.province:
+                    return False
+                if user_entry.province != candidate_entry.province:
+                    return False
+            
+            return True
+
+        # Helper to actually pick and reserve a partner from a given queue
+        async def pick_from_queue(queue: List[int]) -> Optional[int]:
+            for candidate_id in list(queue):
+                if candidate_id == user_id:
+                    continue
+                if candidate_id not in self._user_data:
+                    # stale id, clean up
+                    queue.remove(candidate_id)
+                    continue
+                
+                # Check filters
+                candidate_entry = self._user_data[candidate_id]
+                if not matches_filters(entry, candidate_entry):
+                    continue  # Skip this candidate, try next
+                
+                # Reserve both in queues (remove from queue lists, keep user_data)
+                if user_id in self._boys_queue:
+                    self._boys_queue.remove(user_id)
+                if user_id in self._girls_queue:
+                    self._girls_queue.remove(user_id)
+                if candidate_id in self._boys_queue:
+                    self._boys_queue.remove(candidate_id)
+                if candidate_id in self._girls_queue:
+                    self._girls_queue.remove(candidate_id)
+                return candidate_id
+            return None
+
+        # Boys: prefer boy-boy, then boy-girl
+        if gender == "male":
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Boy {user_id} looking for match. Boys in queue: {len(self._boys_queue)}, Girls in queue: {len(self._girls_queue)}, preferred_gender: {preferred_gender}")
+            
+            # If user explicitly wants a girl (paid/premium), match directly without probability
+            if preferred_gender == "female":
+                partner = await pick_from_queue(self._girls_queue)
+                if partner:
+                    logger.info(f"Boy {user_id} matched with girl {partner} (explicit preference, no probability check)")
+                    return partner
+                return None
+            
+            # If user explicitly wants a boy, match with boy
+            if preferred_gender == "male":
+                partner = await pick_from_queue(self._boys_queue)
+                if partner:
+                    logger.info(f"Boy {user_id} matched with boy {partner}")
+                    return partner
+                return None
+            
+            # If preferred_gender is None (random search), apply probability restriction (unless premium)
+            # Try boy-boy first
+            partner = await pick_from_queue(self._boys_queue)
+            if partner:
+                logger.info(f"Boy {user_id} matched with boy {partner}")
+                return partner
+            # Then boy-girl
+            # Premium users: no probability restriction even in random search
+            # Non-premium users: check probability to make it harder (encouraging premium)
+            if entry.is_premium or random.random() < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+                partner = await pick_from_queue(self._girls_queue)
+                if partner:
+                    if entry.is_premium:
+                        logger.info(f"Boy {user_id} matched with girl {partner} (random search, premium user, no probability check)")
+                    else:
+                        logger.info(f"Boy {user_id} matched with girl {partner} (random search, probability check passed)")
+                    return partner
+            # If probability check failed, stay in queue (will be checked again in next cycle)
+            logger.debug(f"Boy {user_id} probability check failed for girl match (random search), staying in queue")
+            return None
+
+        # Girls
+        if gender == "female":
+            # If user explicitly wants a boy (paid/premium), match directly without probability
+            if preferred_gender == "male":
+                # If there is any boy-boy pair possible, give priority to them
+                if await self._exists_boy_boy_pair():
+                    # Let worker handle boy-boy first; don't match this girl now
+                    return None
+                # No boy-boy pair → match directly (no probability check for explicit preference)
+                partner = await pick_from_queue(self._boys_queue)
+                if partner:
+                    logger.info(f"Girl {user_id} matched with boy {partner} (explicit preference, no probability check)")
+                    return partner
+                # Fallback: match girl-girl if possible
+                partner = await pick_from_queue(self._girls_queue)
+                return partner
+            
+            # If user explicitly wants a girl, match with girl
+            if preferred_gender == "female":
+                partner = await pick_from_queue(self._girls_queue)
+                return partner
+            
+            # If preferred_gender is None (random search), apply probability restriction (unless premium)
+            # If there is any boy-boy pair possible, give priority to them
+            if await self._exists_boy_boy_pair():
+                # Let worker handle boy-boy first; don't match this girl now
+                return None
+            # No boy-boy pair → check probability before matching girl with boy (only for random search)
+            # Premium users: no probability restriction even in random search
+            # Non-premium users: check probability to make it harder (encouraging premium)
+            if entry.is_premium or random.random() < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+                partner = await pick_from_queue(self._boys_queue)
+                if partner:
+                    if entry.is_premium:
+                        logger.info(f"Girl {user_id} matched with boy {partner} (random search, premium user, no probability check)")
+                    else:
+                        logger.info(f"Girl {user_id} matched with boy {partner} (random search, probability check passed)")
+                    return partner
+            # If probability check failed or no boy available, stay in queue
+            # (will be checked again in next worker cycle)
+            # Fallback: match girl-girl if possible
+            partner = await pick_from_queue(self._girls_queue)
+            return partner
+
+        # Other / unknown genders: simple FIFO across all
+        # Build a combined list preserving order (boys first, then girls)
+        combined = self._boys_queue + [uid for uid in self._girls_queue if uid not in self._boys_queue]
+        for candidate_id in combined:
+            if candidate_id == user_id:
+                continue
+            if candidate_id not in self._user_data:
+                continue
+            if user_id in self._boys_queue:
+                self._boys_queue.remove(user_id)
+            if user_id in self._girls_queue:
+                self._girls_queue.remove(user_id)
+            if candidate_id in self._boys_queue:
+                self._boys_queue.remove(candidate_id)
+            if candidate_id in self._girls_queue:
+                self._girls_queue.remove(candidate_id)
+            return candidate_id
+
+        return None
+
+    async def get_queue_count(
+        self,
+        gender: Optional[str] = None,
+        city: Optional[str] = None,  # city not used in in-memory backend
+    ) -> int:
+        """Get queue count by gender (city is ignored for in-memory backend)."""
+        if gender == "male":
+            return len([uid for uid in self._boys_queue if uid in self._user_data])
+        if gender == "female":
+            return len([uid for uid in self._girls_queue if uid in self._user_data])
+        # all
+        return len(self._user_data)
+
+    async def get_total_queue_count(self) -> int:
+        """Get total number of unique users in queues."""
+        return len(self._user_data)
+
+    async def get_all_user_ids(self) -> List[int]:
+        """Return all user IDs currently present in the in-memory queue."""
+        return list(self._user_data.keys())
+
+    async def is_user_in_queue(self, user_id: int) -> bool:
+        """Check if user is present in the in-memory queue."""
+        return user_id in self._user_data
+
+    async def get_queue_count_by_gender(self) -> Dict[str, int]:
+        """Get count of users in queue by gender."""
+        counts = {"male": 0, "female": 0, "other": 0}
+        for entry in self._user_data.values():
+            g = entry.gender or "other"
+            if g not in counts:
+                g = "other"
+            counts[g] += 1
+        return counts
+
+    # Block-list APIs are kept for compatibility but implemented as no-ops
+    # for the in-memory backend, because the 7-hour rule is enforced via DB.
+
+    async def add_blocked_user(self, user_id: int, blocked_user_id: int, ttl: int = 3600 * 7) -> bool:  # noqa: ARG002
+        return True
+
+    async def is_user_blocked(self, user_id: int, blocked_user_id: int) -> bool:  # noqa: ARG002
+        return False
+
+    async def remove_blocked_user(self, user_id: int, blocked_user_id: int) -> bool:  # noqa: ARG002
         return True
 

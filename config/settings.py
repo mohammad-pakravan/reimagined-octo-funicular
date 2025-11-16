@@ -76,12 +76,34 @@ class Settings(BaseSettings):
     PREMIUM_CHAT_DURATION_MINUTES: int = Field(default=180, description="Maximum chat duration for premium users")
     MATCHMAKING_TIMEOUT_SECONDS: int = Field(default=300, description="Timeout for matchmaking in seconds")
     
+    # Cost configuration
+    CHAT_REQUEST_COST: int = Field(default=1, description="Cost in coins for sending a chat request (non-premium users)")
+    DIRECT_MESSAGE_COST: int = Field(default=1, description="Cost in coins for sending a direct message (non-premium users)")
+    
     # Matchmaking worker configuration
     MATCHMAKING_WORKER_INTERVAL: int = Field(default=1, description="Matchmaking worker check interval in seconds")
     MATCHMAKING_WORKER_BATCH_SIZE: int = Field(default=5, description="Number of matches to process per worker cycle")
+    MATCHMAKING_BACKEND: str = Field(
+        default="redis",
+        description="Backend for matchmaking queue: 'redis' or 'memory'"
+    )
     
     # Rate limiting
     RATE_LIMIT_MESSAGES_PER_MINUTE: int = Field(default=20, description="Max messages per minute per user")
+
+    # Virtual profile / bot simulation (currently optional, used in some deployments)
+    VIRTUAL_PROFILE_BOT_ENABLED: bool = Field(
+        default=False,
+        description="Enable virtual profile bot (simulated users)",
+    )
+    VIRTUAL_PROFILE_MIN_WAIT_SECONDS: int = Field(
+        default=4,
+        description="Minimum wait time in seconds before virtual profile joins queue",
+    )
+    VIRTUAL_PROFILE_MAX_WAIT_SECONDS: int = Field(
+        default=120,
+        description="Maximum wait time in seconds before virtual profile joins queue",
+    )
     
     # Engagement Features Configuration
     # Points configuration
@@ -102,6 +124,22 @@ class Settings(BaseSettings):
     
     # Achievement configuration
     ACHIEVEMENT_CHECK_ENABLED: bool = Field(default=True, description="Enable achievement checking")
+    
+    # Matchmaking probability configuration
+    RANDOM_GIRL_BOY_MATCH_PROBABILITY: float = Field(
+        default=0.3,
+        description="Probability (0.0-1.0) for girls to match with boys in random chat when no boy-boy pairs exist. Lower = harder for girls to match with boys."
+    )
+    
+    # No-rematch rule configuration
+    ENABLE_NO_REMATCH_RULE: bool = Field(
+        default=True,
+        description="Enable the rule that prevents users from matching again within a cooldown period"
+    )
+    NO_REMATCH_HOURS: int = Field(
+        default=7,
+        description="Number of hours that must pass before two users can be matched again (only applies if ENABLE_NO_REMATCH_RULE is True)"
+    )
     
     class Config:
         env_file = ".env"

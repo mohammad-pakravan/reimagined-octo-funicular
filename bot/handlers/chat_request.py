@@ -109,13 +109,15 @@ async def process_chat_request_message(message: Message, state: FSMContext):
         from db.crud import check_user_premium, get_user_points
         user_premium = await check_user_premium(db_session, user.id)
         
-        # If not premium, check if user has enough coins (1 coin for chat request)
+        # If not premium, check if user has enough coins
         if not user_premium:
+            from config.settings import settings
+            chat_request_cost = settings.CHAT_REQUEST_COST
             user_points = await get_user_points(db_session, user.id)
-            if user_points < 1:
+            if user_points < chat_request_cost:
                 await message.answer(
                     f"⚠️ سکه کافی نداری!\n\n"
-                    f"💰 برای ارسال درخواست چت به 1 سکه نیاز داری.\n"
+                    f"💰 برای ارسال درخواست چت به {chat_request_cost} سکه نیاز داری.\n"
                     f"💎 سکه فعلی تو: {user_points}\n\n"
                     f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی یا پریمیوم بگیری."
                 )
@@ -128,7 +130,7 @@ async def process_chat_request_message(message: Message, state: FSMContext):
                 f"💬 درخواست چت\n\n"
                 f"📝 پیام شما:\n{request_message}\n\n"
                 f"📤 برای: {get_display_name(receiver)}\n\n"
-                f"💰 هزینه این درخواست: 1 سکه\n"
+                f"💰 هزینه این درخواست: {chat_request_cost} سکه\n"
                 f"💎 سکه‌های فعلی تو: {user_points}\n\n"
                 f"آیا می‌خواهید این درخواست را ارسال کنید؟",
                 reply_markup=get_confirm_keyboard("chat_request:send")
@@ -235,17 +237,19 @@ async def confirm_chat_request_send(callback: CallbackQuery, state: FSMContext):
         
         # Deduct coin if not premium
         if not user_premium:
+            from config.settings import settings
+            chat_request_cost = settings.CHAT_REQUEST_COST
             user_points = await get_user_points(db_session, user.id)
-            if user_points < 1:
+            if user_points < chat_request_cost:
                 await callback.answer("❌ سکه کافی نداری!", show_alert=True)
                 await state.clear()
                 return
             
-            # Deduct 1 coin
+            # Deduct coins
             success = await spend_points(
                 db_session,
                 user.id,
-                1,
+                chat_request_cost,
                 "spent",
                 "chat_request",
                 f"Cost for sending chat request to user {receiver.id}"

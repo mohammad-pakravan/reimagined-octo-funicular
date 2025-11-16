@@ -72,17 +72,19 @@ async def process_dm_message(message: Message, state: FSMContext):
         if user_premium:
             cost_text = "💎 این پیام رایگان است (پریمیوم)"
         else:
+            from config.settings import settings
+            dm_cost = settings.DIRECT_MESSAGE_COST
             user_points = await get_user_points(db_session, user.id)
-            if user_points < 1:
+            if user_points < dm_cost:
                 await message.answer(
                     f"⚠️ سکه کافی نداری!\n\n"
-                    f"💰 برای ارسال پیام دایرکت به 1 سکه نیاز داری.\n"
+                    f"💰 برای ارسال پیام دایرکت به {dm_cost} سکه نیاز داری.\n"
                     f"💎 سکه فعلی تو: {user_points}\n\n"
                     f"💡 می‌تونی سکه‌هات رو به پریمیوم تبدیل کنی یا پریمیوم بگیری."
                 )
                 await state.clear()
                 return
-            cost_text = f"💰 هزینه این پیام: 1 سکه\n💎 سکه‌های فعلی تو: {user_points}"
+            cost_text = f"💰 هزینه این پیام: {dm_cost} سکه\n💎 سکه‌های فعلی تو: {user_points}"
         
         await message.answer(
             f"✉️ پیام دایرکت\n\n"
@@ -142,17 +144,19 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
         
         # Deduct coin if not premium
         if not user_premium:
+            from config.settings import settings
+            dm_cost = settings.DIRECT_MESSAGE_COST
             user_points = await get_user_points(db_session, user.id)
-            if user_points < 1:
+            if user_points < dm_cost:
                 await callback.answer("❌ سکه کافی نداری!", show_alert=True)
                 await state.clear()
                 return
             
-            # Deduct 1 coin
+            # Deduct coins
             success = await spend_points(
                 db_session,
                 user.id,
-                1,
+                dm_cost,
                 "spent",
                 "direct_message",
                 f"Cost for sending direct message to user {receiver.id}"

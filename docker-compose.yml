@@ -52,10 +52,10 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       UPLOAD_LIMIT: 300M
       # phpMyAdmin authentication (HTTP Basic Auth)
-      PMA_CONTROLUSER: ${PHPMYADMIN_USER:-mpak1913}
-      PMA_CONTROLPASS: ${PHPMYADMIN_PASSWORD:-@mpak1913}
+     # PMA_CONTROLUSER: ${PHPMYADMIN_USER:-mpak1913}
+     # PMA_CONTROLPASS: ${PHPMYADMIN_PASSWORD:-@mpak1913}
       # Enable authentication
-      PMA_ARBITRARY: 0
+      PMA_ARBITRARY: 1
     depends_on:
       - mysql
     restart: unless-stopped

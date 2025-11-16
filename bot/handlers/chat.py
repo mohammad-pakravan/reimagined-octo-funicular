@@ -3,6 +3,7 @@ Chat handler for the bot.
 Handles starting chat, ending chat, and video call requests.
 """
 import asyncio
+from typing import Optional
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -29,6 +30,7 @@ router = Router()
 class ChatStates(StatesGroup):
     """FSM states for chat."""
     waiting_preferred_gender = State()
+    waiting_chat_filters = State()
 
 
 # Export ChatStates for use in other modules
@@ -53,7 +55,7 @@ def set_chat_manager(manager: ChatManager):
 
 @router.callback_query(F.data.startswith("pref_gender:"))
 async def process_chat_gender_preference(callback: CallbackQuery, state: FSMContext):
-    """Process preferred gender selection for chat."""
+    """Process preferred gender selection for chat (direct selection: female/male/random)."""
     if not matchmaking_queue or not chat_manager:
         await callback.answer("❌ خطای سیستم. لطفاً دوباره تلاش کنید.", show_alert=True)
         return
@@ -61,17 +63,175 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
     preferred_gender = callback.data.split(":")[1]
     user_id = callback.from_user.id
     
-    # Log for debugging
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"DEBUG: User {user_id} selected preferred_gender: {preferred_gender}")
-    
-    # Convert "all" to None
+    # Convert "all" to None for random search
     if preferred_gender == "all":
         preferred_gender = None
-        logger.info(f"DEBUG: User {user_id} preferred_gender converted to None (all selected)")
+    
+    # Directly add to queue with same_age filter from user's default settings
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        
+        if not user or not user.gender or not user.age or not user.city:
+            await callback.answer(
+                "❌ لطفاً ابتدا پروفایل خودت را کامل کن. /start را بزنید.",
+                show_alert=True
+            )
+            return
+        
+        # Check if user already has active chat
+        if await chat_manager.is_chat_active(user.id, db_session):
+            await callback.answer("❌ شما در حال حاضر یک چت فعال دارید!", show_alert=True)
+            await state.clear()
+            return
+        
+        # Check if user is already in queue
+        if await matchmaking_queue.is_user_in_queue(user_id):
+            await callback.answer(
+                "⏳ در حال جستجو هستی ! 🔍\n\n"
+                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                show_alert=True
+            )
+            return
+        
+        await callback.answer()
+        
+        # Get user's default same_age filter setting
+        filter_same_age = getattr(user, 'default_chat_filter_same_age', True)
+        
+        # Add to queue directly
+        await add_user_to_queue_direct(
+            callback=callback,
+            state=state,
+            user=user,
+            db_session=db_session,
+            preferred_gender=preferred_gender,
+            filter_same_age=filter_same_age,
+            filter_same_city=False,
+            filter_same_province=False,
+        )
+        break
+
+
+@router.callback_query(F.data == "chat:filter_city")
+async def filter_by_city(callback: CallbackQuery, state: FSMContext):
+    """Show gender selection after choosing city filter."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        
+        if not user or not user.gender or not user.age or not user.city:
+            await callback.answer(
+                "❌ لطفاً ابتدا پروفایل خودت را کامل کن. /start را بزنید.",
+                show_alert=True
+            )
+            return
+        
+        await callback.answer()
+        
+        from bot.keyboards.common import get_city_province_gender_keyboard
+        try:
+            await callback.message.edit_text(
+                "🏙️ جستجوی همشهری\n\n"
+                "مخاطب شما چه جنسیتی باشه؟",
+                reply_markup=get_city_province_gender_keyboard("city")
+            )
+        except:
+            await callback.message.answer(
+                "🏙️ جستجوی همشهری\n\n"
+                "مخاطب شما چه جنسیتی باشه؟",
+                reply_markup=get_city_province_gender_keyboard("city")
+            )
+        break
+
+
+@router.callback_query(F.data == "chat:filter_province")
+async def filter_by_province(callback: CallbackQuery, state: FSMContext):
+    """Show gender selection after choosing province filter."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        
+        if not user or not user.gender or not user.age or not user.city:
+            await callback.answer(
+                "❌ لطفاً ابتدا پروفایل خودت را کامل کن. /start را بزنید.",
+                show_alert=True
+            )
+            return
+        
+        await callback.answer()
+        
+        from bot.keyboards.common import get_city_province_gender_keyboard
+        try:
+            await callback.message.edit_text(
+                "🗺️ جستجوی هم‌استانی\n\n"
+                "مخاطب شما چه جنسیتی باشه؟",
+                reply_markup=get_city_province_gender_keyboard("province")
+            )
+        except:
+            await callback.message.answer(
+                "🗺️ جستجوی هم‌استانی\n\n"
+                "مخاطب شما چه جنسیتی باشه؟",
+                reply_markup=get_city_province_gender_keyboard("province")
+            )
+        break
+
+
+@router.callback_query(F.data == "chat:toggle_same_age")
+async def toggle_same_age_filter(callback: CallbackQuery):
+    """Toggle same age filter setting."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        # Toggle the setting
+        current_value = getattr(user, 'default_chat_filter_same_age', True)
+        user.default_chat_filter_same_age = not current_value
+        await db_session.commit()
+        
+        new_value = user.default_chat_filter_same_age
+        status_text = "✅ فعال شد" if new_value else "❌ غیرفعال شد"
+        
+        await callback.answer(f"🎂 فیلتر همسن {status_text}", show_alert=False)
+        
+        # Update the keyboard to show new status
+        from bot.keyboards.common import get_preferred_gender_keyboard
+        try:
+            await callback.message.edit_reply_markup(reply_markup=get_preferred_gender_keyboard(same_age_enabled=new_value))
+        except:
+            pass
+        break
+
+
+@router.callback_query(F.data.startswith("chat_filter:"))
+async def process_city_province_filters(callback: CallbackQuery, state: FSMContext):
+    """Process city/province filter with gender selection."""
+    if not matchmaking_queue or not chat_manager:
+        await callback.answer("❌ خطای سیستم. لطفاً دوباره تلاش کنید.", show_alert=True)
+        return
+    
+    # Parse callback data: chat_filter:city:gender or chat_filter:province:gender
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("❌ خطا در پردازش درخواست.", show_alert=True)
+        return
+    
+    filter_type = parts[1]  # 'city' or 'province'
+    preferred_gender_str = parts[2]  # 'female', 'male', or 'all'
+    
+    user_id = callback.from_user.id
+    
+    # Convert gender string
+    if preferred_gender_str == "all":
+        preferred_gender = None
     else:
-        logger.info(f"DEBUG: User {user_id} preferred_gender kept as: {preferred_gender}")
+        preferred_gender = preferred_gender_str
     
     async for db_session in get_db():
         user = await get_user_by_telegram_id(db_session, user_id)
@@ -100,129 +260,164 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         
         await callback.answer()
         
-        # Check if user has premium
-        from db.crud import check_user_premium
-        user_premium = await check_user_premium(db_session, user.id)
+        # Set filters based on type
+        filter_same_city = (filter_type == "city")
+        filter_same_province = (filter_type == "province")
+        # Use user's default same_age filter setting
+        filter_same_age = getattr(user, 'default_chat_filter_same_age', True)
         
-        # Get chat cost from system settings
-        from db.crud import get_system_setting_value, get_user_points
-        chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
-        try:
-            chat_cost = int(chat_cost_str)
-        except (ValueError, TypeError):
-            chat_cost = 3
-        
-        user_points = await get_user_points(db_session, user.id)
-        
-        # Check if user has enough coins before adding to queue
-        # Allow if: premium OR "all" selected OR has enough coins
-        if not user_premium and preferred_gender is not None and user_points < chat_cost:
-            # User doesn't have premium, selected specific gender, and doesn't have enough coins
-            # Show premium menu instead
-            from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
-            try:
-                await callback.message.edit_text(
-                    f"⚠️ سکه کافی نداری!\n\n"
-                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
-                    f"💎 سکه فعلی تو: {user_points}\n\n"
-                    f"💡 می‌تونی:\n"
-                    f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
-                    f"• یا پریمیوم بگیری (چت رایگان)\n"
-                    f"• یا «همه» رو انتخاب کنی (رایگان)",
-                    reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
-                )
-            except:
-                await callback.message.answer(
-                    f"⚠️ سکه کافی نداری!\n\n"
-                    f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
-                    f"💎 سکه فعلی تو: {user_points}\n\n"
-                    f"💡 می‌تونی:\n"
-                    f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
-                    f"• یا پریمیوم بگیری (چت رایگان)\n"
-                    f"• یا «همه» رو انتخاب کنی (رایگان)",
-                    reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
-                )
-            return
-        
-        # Add user to queue with preferred gender (no filters)
-        logger.info(f"DEBUG: User {user_id} adding to queue with preferred_gender: {preferred_gender}")
-        await matchmaking_queue.add_user_to_queue(
-            user_id=user_id,
-            gender=user.gender,
-            city=user.city,
-            age=user.age,
+        # Add to queue
+        await add_user_to_queue_direct(
+            callback=callback,
+            state=state,
+            user=user,
+            db_session=db_session,
             preferred_gender=preferred_gender,
-            min_age=None,
-            max_age=None,
-            preferred_city=None,
+            filter_same_age=filter_same_age,
+            filter_same_city=filter_same_city,
+            filter_same_province=filter_same_province,
         )
-        logger.info(f"DEBUG: User {user_id} added to queue successfully")
-        
-        queue_count = await matchmaking_queue.get_total_queue_count()
-        gender_counts = await matchmaking_queue.get_queue_count_by_gender()
-        
-        from bot.keyboards.common import get_queue_status_keyboard
-        
-        # Get required message count from system settings
-        required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
+        break
+
+
+async def add_user_to_queue_direct(
+    callback: CallbackQuery,
+    state: FSMContext,
+    user,
+    db_session,
+    preferred_gender: Optional[str],
+    filter_same_age: bool,
+    filter_same_city: bool,
+    filter_same_province: bool,
+):
+    """Helper function to add user to queue with filters and show status."""
+    user_id = user.telegram_id
+    
+    # Check if user has premium
+    from db.crud import check_user_premium, get_system_setting_value, get_user_points
+    user_premium = await check_user_premium(db_session, user.id)
+    
+    # Get chat cost
+    chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
+    try:
+        chat_cost = int(chat_cost_str)
+    except (ValueError, TypeError):
+        chat_cost = 3
+    
+    user_points = await get_user_points(db_session, user.id)
+    
+    # Check if user has enough coins
+    if not user_premium and preferred_gender is not None and user_points < chat_cost:
+        from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
         try:
-            required_message_count = int(required_message_count_str)
-        except (ValueError, TypeError):
-            required_message_count = 2
-        
-        # Prepare queue status message with beautiful UI
-        total_online = 983 + queue_count
-        
-        # Helper function to generate cost summary
-        def get_search_cost_summary():
-            if user_premium:
-                return "💰 هزینه: رایگان (پریمیوم)"
-            elif preferred_gender is None:
-                return "💰 هزینه: رایگان (همه)"
-            elif user_points < chat_cost:
-                return f"⚠️ سکه کافی نداری ({chat_cost} سکه نیاز داری)"
-            else:
-                return f"💰 هزینه: {chat_cost} سکه"
-        
-        cost_summary = get_search_cost_summary()
-        
-        # Build queue status message
-        if not user_premium:
-            # For non-premium users, show premium features
-            queue_status_text = (
-                f"🔍 در حال جستجو...\n\n"
-                f"{cost_summary}\n\n"
-                f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم...\n\n"
-                f"💎✨ با پریمیوم تجربه بهتری داشته باش! ✨💎\n\n"
-                f"🎁 ویژگی‌های پریمیوم:\n"
-                f"✅ چت نامحدود بدون سکه و رایگان\n"
-                f"✅ درخواست تماس  نامحدود و رایگان\n"
-                f"✅ پیام دایرکت  نامحدود و رایگان\n"
-                f"✅ اولویت در صف (نفر اول صف)\n\n"
-                f"🚀💎 همین الان پریمیوم بخر و اول صف باش! 💎🚀"
+            await callback.message.edit_text(
+                f"⚠️ سکه کافی نداری!\n\n"
+                f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                f"💎 سکه فعلی تو: {user_points}\n\n"
+                f"💡 می‌تونی:\n"
+                f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
+                f"• یا پریمیوم بگیری (چت رایگان)\n"
+                f"• یا «جستجوی شانسی» رو انتخاب کنی (رایگان)",
+                reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
             )
+        except:
+            await callback.message.answer(
+                f"⚠️ سکه کافی نداری!\n\n"
+                f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                f"💎 سکه فعلی تو: {user_points}\n\n"
+                f"💡 می‌تونی:\n"
+                f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
+                f"• یا پریمیوم بگیری (چت رایگان)\n"
+                f"• یا «جستجوی شانسی» رو انتخاب کنی (رایگان)",
+                reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
+            )
+        await state.clear()
+        return
+    
+    # Add user to queue
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"DEBUG: User {user_id} adding to queue with preferred_gender: {preferred_gender}, filters: age={filter_same_age}, city={filter_same_city}, province={filter_same_province}, is_premium: {user_premium}")
+    await matchmaking_queue.add_user_to_queue(
+        user_id=user_id,
+        gender=user.gender,
+        city=user.city,
+        age=user.age,
+        preferred_gender=preferred_gender,
+        min_age=None,
+        max_age=None,
+        preferred_city=None,
+        filter_same_age=filter_same_age,
+        filter_same_city=filter_same_city,
+        filter_same_province=filter_same_province,
+        province=user.province,
+        is_premium=user_premium,
+    )
+    logger.info(f"DEBUG: User {user_id} added to queue successfully")
+    
+    from bot.keyboards.common import get_queue_status_keyboard
+    
+    # Helper function to generate cost summary
+    def get_search_cost_summary():
+        if user_premium:
+            return "💰 هزینه: رایگان (پریمیوم)"
+        elif preferred_gender is None:
+            return "💰 هزینه: رایگان (شانسی)"
+        elif user_points < chat_cost:
+            return f"⚠️ سکه کافی نداری ({chat_cost} سکه نیاز داری)"
         else:
-            # For premium users, show simple message
-            queue_status_text = (
-                f"🔍 در حال جستجو...\n\n"
-                f"{cost_summary}\n\n"
-                f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
-            )
-        
+            return f"💰 هزینه: {chat_cost} سکه"
+    
+    cost_summary = get_search_cost_summary()
+    
+    # Build filter description
+    filter_desc = []
+    if filter_same_age:
+        filter_desc.append("🎂 همسن")
+    if filter_same_city:
+        filter_desc.append("🏙️ همشهری")
+    if filter_same_province:
+        filter_desc.append("🗺️ هم‌استانی")
+    filter_text = " | ".join(filter_desc) if filter_desc else "بدون فیلتر"
+    
+    # Build queue status message
+    if not user_premium:
+        queue_status_text = (
+            f"🔍 در حال جستجو...\n\n"
+            f"{cost_summary}\n"
+            f"🔎 فیلتر: {filter_text}\n\n"
+            f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم...\n\n"
+            f"💎✨ با پریمیوم تجربه بهتری داشته باش! ✨💎\n\n"
+            f"🎁 ویژگی‌های پریمیوم:\n"
+            f"✅ چت نامحدود بدون سکه و رایگان\n"
+            f"✅ درخواست تماس  نامحدود و رایگان\n"
+            f"✅ پیام دایرکت  نامحدود و رایگان\n"
+            f"✅ اولویت در صف (نفر اول صف)\n\n"
+            f"🚀💎 همین الان پریمیوم بخر و اول صف باش! 💎🚀"
+        )
+    else:
+        queue_status_text = (
+            f"🔍 در حال جستجو...\n\n"
+            f"{cost_summary}\n"
+            f"🔎 فیلتر: {filter_text}\n\n"
+            f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
+        )
+    
+    try:
         await callback.message.edit_text(
             queue_status_text,
             reply_markup=get_queue_status_keyboard(user_premium)
         )
-        
-        await state.clear()
-        
-        # Create timeout task - if no match found after 2 minutes, notify user
-        asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
-        
-        # Don't call try_find_match here - let the worker handle matching
-        # This prevents duplicate messages
-        # The worker will handle matching in the background
-        break
+    except:
+        await callback.message.answer(
+            queue_status_text,
+            reply_markup=get_queue_status_keyboard(user_premium)
+        )
+    
+    await state.clear()
+    
+    # Create timeout task
+    asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
 
 
 async def check_matchmaking_timeout(user_id: int, telegram_id: int):
@@ -265,10 +460,13 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
             return
         
         # Ask for preferred gender
+        # Get user's default same_age filter setting
+        default_same_age = getattr(user, 'default_chat_filter_same_age', True)
         await callback.message.edit_text(
             "💬 شروع چت ناشناس\n\n"
-            "به دنبال چه جنسیتی هستی؟",
-            reply_markup=get_preferred_gender_keyboard()
+            "انتخاب کن با کی میخوای چت کنی ؟ 🚀\n\n"
+             "انتخاب فیلترها ممکنه روی سرعت چتت اثر بگذاره 💡",
+            reply_markup=get_preferred_gender_keyboard(same_age_enabled=default_same_age)
         )
         
         await state.set_state(ChatStates.waiting_preferred_gender)
@@ -709,11 +907,22 @@ async def end_chat_confirm(callback: CallbackQuery):
                 user_current_points
             )
             
-            # Ask if user wants to search again and delete messages
+            # Get partner profile_id for message
+            partner_profile_id_text = ""
+            if partner:
+                # Generate profile_id if not exists
+                if not partner.profile_id:
+                    import hashlib
+                    profile_id = hashlib.md5(f"user_{partner.telegram_id}".encode()).hexdigest()[:12]
+                    partner.profile_id = profile_id
+                    await db_session.commit()
+                    await db_session.refresh(partner)
+                partner_profile_id_text = f"/user_{partner.profile_id}"
+            
+            # Create keyboard with only "جستجوی دوباره" and "حذف پیام‌ها"
             search_again_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="🔍 بله، جستجو کن", callback_data="chat:search_again"),
-                    InlineKeyboardButton(text="❌ خیر", callback_data="chat:no_search"),
+                    InlineKeyboardButton(text="🔍 جستجوی دوباره", callback_data="chat:search_again"),
                 ],
                 [
                     InlineKeyboardButton(text="🗑️ حذف پیام‌های من", callback_data="chat:delete_my_messages"),
@@ -721,21 +930,29 @@ async def end_chat_confirm(callback: CallbackQuery):
             ])
             
             from bot.keyboards.reply import get_main_reply_keyboard
-            # Send message with inline keyboard for search options
-            await callback.message.answer(
-                f"💬 چت شما قطع شد\n\n"
-                f"{user_cost_summary}\n\n"
-                f"🔍 می‌خوای دوباره جستجو کنی؟",
-                reply_markup=search_again_keyboard
-            )
-            # Update keyboard to main keyboard by sending a message with reply keyboard
+            # Edit the confirmation message to show final message (single message)
             try:
+                await callback.message.edit_text(
+                    f"💬 چت شما با {partner_profile_id_text} به پایان رسید\n\n"
+                    f"{user_cost_summary}",
+                    reply_markup=search_again_keyboard
+                )
+                # Update reply keyboard by sending a message with reply keyboard
                 await callback.message.answer(
                     "📱 منوی اصلی",
                     reply_markup=get_main_reply_keyboard()
                 )
             except:
-                pass
+                # If edit fails, send new message
+                await callback.message.answer(
+                    f"💬 چت شما با {partner_profile_id_text} به پایان رسید\n\n"
+                    f"{user_cost_summary}",
+                    reply_markup=search_again_keyboard
+                )
+                await callback.message.answer(
+                    "📱 منوی اصلی",
+                    reply_markup=get_main_reply_keyboard()
+                )
             
             # Send message to partner if exists
             if partner:
@@ -749,13 +966,22 @@ async def end_chat_confirm(callback: CallbackQuery):
                     partner_current_points
                 )
                 
+                # Get user profile_id for partner's message
+                user_profile_id_text = ""
+                if not user.profile_id:
+                    import hashlib
+                    profile_id = hashlib.md5(f"user_{user.telegram_id}".encode()).hexdigest()[:12]
+                    user.profile_id = profile_id
+                    await db_session.commit()
+                    await db_session.refresh(user)
+                user_profile_id_text = f"/user_{user.profile_id}"
+                
                 bot = Bot(token=settings.BOT_TOKEN)
                 try:
-                    # Ask partner if they want to search again and delete messages
+                    # Create keyboard with only "جستجوی دوباره" and "حذف پیام‌ها"
                     partner_search_again_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [
-                            InlineKeyboardButton(text="🔍 بله، جستجو کن", callback_data="chat:search_again"),
-                            InlineKeyboardButton(text="❌ خیر", callback_data="chat:no_search"),
+                            InlineKeyboardButton(text="🔍 جستجوی دوباره", callback_data="chat:search_again"),
                         ],
                         [
                             InlineKeyboardButton(text="🗑️ حذف پیام‌های من", callback_data="chat:delete_my_messages"),
@@ -764,9 +990,8 @@ async def end_chat_confirm(callback: CallbackQuery):
                     
                     await bot.send_message(
                         partner.telegram_id,
-                        f"💬 چت شما قطع شد\n\n"
-                        f"{partner_cost_summary}\n\n"
-                        f"🔍 می‌خوای دوباره جستجو کنی؟",
+                        f"💬 چت شما با {user_profile_id_text} به پایان رسید\n\n"
+                        f"{partner_cost_summary}",
                         reply_markup=partner_search_again_keyboard
                     )
                     # Update keyboard to main keyboard for partner
@@ -787,10 +1012,10 @@ async def end_chat_confirm(callback: CallbackQuery):
             # Don't delete messages automatically - user can request deletion via button
             # Message IDs are stored in Redis and will be available for deletion request
             
-            # Award coins for successful chat
-            if chat_successful and partner_id:
-                from core.points_manager import PointsManager
-                await PointsManager.award_chat_success(user.id, partner_id)
+            # Award coins for successful chat - DISABLED (removed as per user request)
+            # if chat_successful and partner_id:
+            #     from core.points_manager import PointsManager
+            #     await PointsManager.award_chat_success(user.id, partner_id)
             
             # Check and award badges for chat achievements
             if chat_successful:

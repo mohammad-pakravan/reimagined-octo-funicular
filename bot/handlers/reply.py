@@ -56,11 +56,15 @@ async def start_chat_button(message: Message, state: FSMContext):
             )
             return
         
+        # Get user's default same_age filter setting
+        default_same_age = getattr(user, 'default_chat_filter_same_age', True)
+        
         # Ask for preferred gender
         await message.answer(
             "💬 شروع چت ناشناس\n\n"
-            "به دنبال چه جنسیتی هستی؟",
-            reply_markup=get_preferred_gender_keyboard()
+            "انتخاب کن با کی میخوای چت کنی ؟ 🚀\n\n"
+            "انتخاب فیلترها ممکنه روی سرعت چتت اثر بگذاره 💡",
+            reply_markup=get_preferred_gender_keyboard(same_age_enabled=default_same_age)
         )
         
         # Set state to wait for gender selection

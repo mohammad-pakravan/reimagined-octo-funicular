@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Optional
 from db.database import get_db
-from db.crud import get_user_by_telegram_id, get_user_by_id
+from db.crud import get_user_by_telegram_id, get_user_by_id, had_recent_chat
 from core.matchmaking import MatchmakingQueue
 from core.chat_manager import ChatManager
 from config.settings import settings
@@ -46,25 +46,19 @@ async def check_and_match_users():
     all_users = await matchmaking_queue.get_total_queue_count()
     if all_users < 2:
         return  # Need at least 2 users to match
-    
-    # Get pattern to find all users in queue
-    pattern = f"matchmaking:user:*"
+
     processed_users = set()
     matches_found = []
     batch_size = settings.MATCHMAKING_WORKER_BATCH_SIZE
-    
-    # Collect potential matches
-    async for key in matchmaking_queue.redis.scan_iter(match=pattern):
-        user_id_str = key.decode().split(":")[-1] if isinstance(key, bytes) else key.split(":")[-1]
-        try:
-            user_id = int(user_id_str)
-        except ValueError:
-            continue
+
+    # Collect potential matches using abstract queue API (works for Redis and in-memory)
+    user_ids = await matchmaking_queue.get_all_user_ids()
+    for user_id in user_ids:
         
         # Skip if already processed in this cycle
         if user_id in processed_users:
             continue
-        
+
         # Check if user is still in queue (might have been matched)
         if not await matchmaking_queue.is_user_in_queue(user_id):
             continue
@@ -74,6 +68,7 @@ async def check_and_match_users():
         
         if match_id:
             # Match found! Add to list for batch processing
+            logger.info(f"Match found: {user_id} <-> {match_id}")
             processed_users.add(user_id)
             processed_users.add(match_id)
             matches_found.append((user_id, match_id))
@@ -81,6 +76,8 @@ async def check_and_match_users():
             # Stop if we've reached batch size
             if len(matches_found) >= batch_size:
                 break
+        else:
+            logger.debug(f"No match found for user {user_id} in this cycle")
     
     # Process all matches found in this cycle concurrently
     if matches_found:
@@ -101,7 +98,56 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             user2 = await get_user_by_telegram_id(db_session, user2_telegram_id)
             
             if not user1 or not user2:
-                logger.warning(f"User not found: user1={user1_telegram_id}, user2={user2_telegram_id}")
+                logger.warning(
+                    "User not found: user1=%s, user2=%s",
+                    user1_telegram_id,
+                    user2_telegram_id,
+                )
+                return
+
+            # Enforce no-rematch rule using database history (if enabled).
+            # If this rule is enabled and these two users had a chat that ended
+            # within the configured hours, we skip creating a new chat for them.
+            if settings.ENABLE_NO_REMATCH_RULE:
+                if await had_recent_chat(db_session, user1.id, user2.id, hours=settings.NO_REMATCH_HOURS):
+                    logger.info(
+                        "Skipping match for users %s and %s due to recent chat within %s hours",
+                        user1_telegram_id,
+                        user2_telegram_id,
+                        settings.NO_REMATCH_HOURS,
+                    )
+                # Users were removed from queue in find_match, but match failed
+                # We need to re-add them to queue so they can try matching with others
+                # Get user data from DB to re-add them
+                user1_data = await matchmaking_queue.get_user_data(user1_telegram_id)
+                if not user1_data:
+                    # Try to get from DB and re-add (get_user_by_telegram_id is already imported at top)
+                    user1_obj = await get_user_by_telegram_id(db_session, user1_telegram_id)
+                    if user1_obj:
+                        from db.crud import check_user_premium
+                        user1_premium = await check_user_premium(db_session, user1_obj.id)
+                        await matchmaking_queue.add_user_to_queue(
+                            user_id=user1_telegram_id,
+                            gender=user1_obj.gender,
+                            city=user1_obj.city,
+                            age=user1_obj.age,
+                            preferred_gender=None,  # Will be lost, but better than nothing
+                            is_premium=user1_premium,
+                        )
+                user2_data = await matchmaking_queue.get_user_data(user2_telegram_id)
+                if not user2_data:
+                    user2_obj = await get_user_by_telegram_id(db_session, user2_telegram_id)
+                    if user2_obj:
+                        from db.crud import check_user_premium
+                        user2_premium = await check_user_premium(db_session, user2_obj.id)
+                        await matchmaking_queue.add_user_to_queue(
+                            user_id=user2_telegram_id,
+                            gender=user2_obj.gender,
+                            city=user2_obj.city,
+                            age=user2_obj.age,
+                            preferred_gender=None,
+                            is_premium=user2_premium,
+                        )
                 return
             
             # Check if either user already has active chat

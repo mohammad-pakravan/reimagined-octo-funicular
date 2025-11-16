@@ -37,6 +37,9 @@ class User(Base):
     is_banned = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     
+    # Chat filter preferences (default settings)
+    default_chat_filter_same_age = Column(Boolean, default=True, nullable=False)  # Default: filter by same age (±3 years)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -721,7 +721,9 @@ async def handle_message_reaction(update: MessageReactionUpdated):
         break
 
 
-@router.message(F.content_type == ContentType.DELETE_CHAT_PHOTO | F.content_type == ContentType.NEW_CHAT_PHOTO)
+@router.message(
+    F.content_type.in_({ContentType.DELETE_CHAT_PHOTO, ContentType.NEW_CHAT_PHOTO})
+)
 async def handle_deleted_messages(message: Message):
     """Handle deleted messages - delete corresponding message from partner."""
     # Note: Telegram doesn't send delete events for private chats

@@ -99,53 +99,40 @@ async def search_users(
             # If activity_tracker is not available, return empty list
             return []
         
-        # For online search, we need to fetch more users and filter
-        # offset represents how many online users to skip (for pagination)
-        online_users = []
-        skipped_online = 0  # Count of online users we've skipped
-        current_db_offset = 0  # Database offset
-        max_fetch = 1000  # Maximum users to check from DB
-        fetched_count = 0
+        # For online search, fetch more users to sort properly
+        # We need to fetch enough users, filter online ones, sort, then apply offset/limit
+        max_fetch_for_sorting = limit + offset + 200  # Fetch extra for sorting
+        query_batch = query.limit(max_fetch_for_sorting)
+        result = await session.execute(query_batch)
+        all_users = list(result.scalars().all())
         
-        while len(online_users) < limit and fetched_count < max_fetch:
-            # Fetch a batch of users from database
-            batch_size = min(limit * 5, max_fetch - fetched_count)  # Fetch 5x more to find online users
-            query_batch = query.order_by(User.created_at.desc()).offset(current_db_offset).limit(batch_size)
-            result = await session.execute(query_batch)
-            batch_users = list(result.scalars().all())
-            
-            if not batch_users:
-                break  # No more users to check
-            
-            # Check each user's online status
-            for user in batch_users:
-                if await activity_tracker.is_online(user.telegram_id):
-                    # Skip if we haven't reached the offset yet
-                    if skipped_online < offset:
-                        skipped_online += 1
-                        continue
-                    
-                    # Add to results
-                    online_users.append(user)
-                    if len(online_users) >= limit:
-                        break
-            
-            # If we found enough online users, break
-            if len(online_users) >= limit:
-                break
-            
-            fetched_count += len(batch_users)
-            current_db_offset += batch_size
-            
-            # If we got fewer users than batch_size, we've reached the end
-            if len(batch_users) < batch_size:
-                break
+        # Filter online users and prepare for sorting
+        online_candidates = []
+        for user in all_users:
+            if await activity_tracker.is_online(user.telegram_id):
+                last_seen = user.last_seen
+                created_at = user.created_at
+                online_candidates.append((user, last_seen, created_at))
         
-        return online_users
+        # Sort online users:
+        # 1. last_seen DESC (newest visit first)
+        # 2. created_at DESC (newest user first)
+        online_candidates.sort(
+            key=lambda x: (
+                -(x[1].timestamp() if x[1] else 0),   # last_seen DESC
+                -(x[2].timestamp() if x[2] else 0)    # created_at DESC
+            )
+        )
+        
+        # Apply offset and limit after sorting
+        sorted_online = [u[0] for u in online_candidates]
+        return sorted_online[offset:offset + limit]
     else:
-        # Normal search (no DB ordering)
-        query = query.offset(offset).limit(limit)
-        result = await session.execute(query)
+        # Normal search - fetch more users than needed for proper sorting
+        # We need to fetch more to sort properly, then apply offset/limit
+        fetch_limit = limit + offset + 100  # Fetch extra to ensure we have enough after sorting
+        query_all = query.limit(fetch_limit)
+        result = await session.execute(query_all)
         users = list(result.scalars().all())
 
         # Prepare for sorting
@@ -156,43 +143,18 @@ async def search_users(
             processed.append((u, last_seen, created_at))
 
         # Sort priority:
-        # 1. last_seen DESC (newest visit first)
-        # 2. created_at DESC (newest user first)
+        # 1. last_seen DESC (newest visit first) - users with recent activity first
+        # 2. created_at DESC (newest user first) - if last_seen is same or None, newest users first
         processed.sort(
             key=lambda x: (
-                -(x[1].timestamp() if x[1] else 0),   # last_seen
-                -(x[2].timestamp() if x[2] else 0)    # created_at
+                -(x[1].timestamp() if x[1] else 0),   # last_seen DESC (newest first)
+                -(x[2].timestamp() if x[2] else 0)    # created_at DESC (newest first)
             )
         )
 
-        return [u[0] for u in processed]
-
-        # Normal search - fetch users (no ordering needed here)
-        query = query.offset(offset).limit(limit)
-        result = await session.execute(query)
-        users = list(result.scalars().all())
-
-        if not activity_tracker:
-            return users  # fallback if no tracker
-
-        # Build sortable list: (user, is_online, last_seen)
-        processed = []
-        for u in users:
-            is_online = await activity_tracker.is_online(u.telegram_id)
-            last_seen = u.last_seen
-            processed.append((u, is_online, last_seen))
-
-        # Sort users:
-        # 1. online users first
-        # 2. then offline users sorted by last_seen DESC (newest first)
-        processed.sort(
-            key=lambda x: (
-                not x[1],               # online = True comes first
-                -(x[2].timestamp() if x[2] else 0)   # newest last_seen → first
-            )
-        )
-
-        return [u[0] for u in processed]
+        # Apply offset and limit after sorting
+        sorted_users = [u[0] for u in processed]
+        return sorted_users[offset:offset + limit]
 
 
 async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
@@ -448,6 +410,39 @@ async def get_active_chat_count(session: AsyncSession) -> int:
         select(func.count(ChatRoom.id)).where(ChatRoom.is_active == True)
     )
     return result.scalar() or 0
+
+
+async def had_recent_chat(
+    session: AsyncSession,
+    user1_id: int,
+    user2_id: int,
+    hours: int = 7,
+) -> bool:
+    """
+    Check if two users have had a chat that ended within the given number of hours.
+
+    This is used to enforce the rule that two users should not be matched again
+    within a cooldown window (e.g. 7 hours).
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+    result = await session.execute(
+        select(ChatRoom)
+        .where(
+            ChatRoom.is_active == False,
+            ChatRoom.ended_at.isnot(None),
+            ChatRoom.ended_at >= cutoff,
+            or_(
+                and_(ChatRoom.user1_id == user1_id, ChatRoom.user2_id == user2_id),
+                and_(ChatRoom.user1_id == user2_id, ChatRoom.user2_id == user1_id),
+            ),
+        )
+        .order_by(ChatRoom.ended_at.desc())
+        .limit(1)
+    )
+
+    last_chat = result.scalar_one_or_none()
+    return last_chat is not None
 
 
 # ============= PremiumSubscription CRUD =============

@@ -17,7 +17,7 @@ import uvicorn
 
 from config.settings import settings
 from db.database import init_db, close_db, get_db
-from core.matchmaking import MatchmakingQueue
+from core.matchmaking import MatchmakingQueue, InMemoryMatchmakingQueue
 from core.chat_manager import ChatManager
 from utils.rate_limiter import MessageRateLimiter
 from utils.user_activity import UserActivityTracker
@@ -93,11 +93,17 @@ async def setup_matchmaking():
     """Setup matchmaking queue."""
     global matchmaking_queue, redis_client
     
+    # For Redis-based storage we still need a Redis client; for in-memory backend
+    # we only use Redis for other features (FSM, rate limiting, etc.).
     if not redis_client:
         redis_client = await setup_redis()
-    
-    matchmaking_queue = MatchmakingQueue(redis_client)
-    logger.info("✅ Matchmaking queue initialized")
+
+    if getattr(settings, "MATCHMAKING_BACKEND", "redis") == "memory":
+        matchmaking_queue = InMemoryMatchmakingQueue()
+        logger.info("✅ Matchmaking queue initialized (in-memory backend)")
+    else:
+        matchmaking_queue = MatchmakingQueue(redis_client)
+        logger.info("✅ Matchmaking queue initialized (redis backend)")
     
     return matchmaking_queue
 
@@ -334,6 +340,8 @@ async def lifespan(app: FastAPI):
         from db.database import run_migration
         import os
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_last_seen.sql")
+        await run_migration(migration_file)
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_default_chat_filter.sql")
         await run_migration(migration_file)
         logger.info("✅ Migrations completed")
     except Exception as e:
