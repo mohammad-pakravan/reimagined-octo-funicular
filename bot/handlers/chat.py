@@ -426,21 +426,36 @@ async def check_matchmaking_timeout(user_id: int, telegram_id: int):
     
     # Check if user is still in queue
     if matchmaking_queue and await matchmaking_queue.is_user_in_queue(user_id):
-        # User is still in queue, no match found
-        # Remove from queue
-        await matchmaking_queue.remove_user_from_queue(user_id)
-        
-        # Notify user
-        bot = Bot(token=settings.BOT_TOKEN)
-        try:
-            await bot.send_message(
-                telegram_id,
-                "❌ متأسفانه کسی رو برات پیدا نکردیم.\n\n"
-                "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
-            )
-            await bot.session.close()
-        except Exception:
-            pass
+        # Before sending timeout message, check if user has active chat
+        # If user has active chat, they were matched successfully, don't send timeout
+        async for db_session in get_db():
+            user = await get_user_by_telegram_id(db_session, telegram_id)
+            if not user:
+                break
+            
+            # Check if user has active chat
+            if chat_manager and await chat_manager.is_chat_active(user.id, db_session):
+                # User has active chat, they were matched successfully
+                # Just remove from queue silently (they might have been matched but not removed from queue)
+                await matchmaking_queue.remove_user_from_queue(user_id)
+                break
+            
+            # User is still in queue and has no active chat, no match found
+            # Remove from queue
+            await matchmaking_queue.remove_user_from_queue(user_id)
+            
+            # Notify user
+            bot = Bot(token=settings.BOT_TOKEN)
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    "❌ متأسفانه کسی رو برات پیدا نکردیم.\n\n"
+                    "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
+                )
+                await bot.session.close()
+            except Exception:
+                pass
+            break
 
 
 @router.callback_query(F.data == "chat:start_search")
