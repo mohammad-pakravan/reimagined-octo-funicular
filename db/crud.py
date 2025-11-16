@@ -143,6 +143,30 @@ async def search_users(
         
         return online_users
     else:
+        # Normal search (no DB ordering)
+        query = query.offset(offset).limit(limit)
+        result = await session.execute(query)
+        users = list(result.scalars().all())
+
+        # Prepare for sorting
+        processed = []
+        for u in users:
+            last_seen = u.last_seen
+            created_at = u.created_at
+            processed.append((u, last_seen, created_at))
+
+        # Sort priority:
+        # 1. last_seen DESC (newest visit first)
+        # 2. created_at DESC (newest user first)
+        processed.sort(
+            key=lambda x: (
+                -(x[1].timestamp() if x[1] else 0),   # last_seen
+                -(x[2].timestamp() if x[2] else 0)    # created_at
+            )
+        )
+
+        return [u[0] for u in processed]
+
         # Normal search - fetch users (no ordering needed here)
         query = query.offset(offset).limit(limit)
         result = await session.execute(query)
