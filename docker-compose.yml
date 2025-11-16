@@ -18,7 +18,7 @@ services:
     container_name: telecaht_mysql
     ports:
       - "3306:3306"
-      # - "14095:3306"
+      # - "13065:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-telecaht}
