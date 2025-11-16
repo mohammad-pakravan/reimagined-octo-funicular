@@ -88,12 +88,14 @@ async def check_and_match_users():
 
 async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
     """Connect two matched users."""
+    logger.info(f"connect_users called for {user1_telegram_id} <-> {user2_telegram_id}")
     if not chat_manager or not bot_instance:
         logger.warning("chat_manager or bot_instance not set, cannot connect users")
         return
     
     async for db_session in get_db():
         try:
+            logger.info(f"Getting users from DB: {user1_telegram_id}, {user2_telegram_id}")
             user1 = await get_user_by_telegram_id(db_session, user1_telegram_id)
             user2 = await get_user_by_telegram_id(db_session, user2_telegram_id)
             
@@ -104,12 +106,17 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                     user2_telegram_id,
                 )
                 return
+            
+            logger.info(f"Users found: user1_id={user1.id}, user2_id={user2.id}")
 
             # Enforce no-rematch rule using database history (if enabled).
             # If this rule is enabled and these two users had a chat that ended
             # within the configured hours, we skip creating a new chat for them.
+            logger.info(f"Checking no-rematch rule for {user1_telegram_id} and {user2_telegram_id}")
             if settings.ENABLE_NO_REMATCH_RULE:
-                if await had_recent_chat(db_session, user1.id, user2.id, hours=settings.NO_REMATCH_HOURS):
+                had_recent = await had_recent_chat(db_session, user1.id, user2.id, hours=settings.NO_REMATCH_HOURS)
+                logger.info(f"had_recent_chat result: {had_recent} for users {user1_telegram_id} and {user2_telegram_id}")
+                if had_recent:
                     logger.info(
                         "Skipping match for users %s and %s due to recent chat within %s hours",
                         user1_telegram_id,
@@ -151,12 +158,16 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                 return
             
             # Check if either user already has active chat
-            if await chat_manager.is_chat_active(user1.id, db_session):
+            logger.info(f"Checking active chat for {user1_telegram_id} and {user2_telegram_id}")
+            user1_has_active = await chat_manager.is_chat_active(user1.id, db_session)
+            user2_has_active = await chat_manager.is_chat_active(user2.id, db_session)
+            logger.info(f"Active chat check: user1={user1_has_active}, user2={user2_has_active}")
+            if user1_has_active:
                 logger.info(f"User {user1_telegram_id} already has active chat, skipping match")
                 # Remove from queue if they have active chat
                 await matchmaking_queue.remove_user_from_queue(user1_telegram_id)
                 return
-            if await chat_manager.is_chat_active(user2.id, db_session):
+            if user2_has_active:
                 logger.info(f"User {user2_telegram_id} already has active chat, skipping match")
                 # Remove from queue if they have active chat
                 await matchmaking_queue.remove_user_from_queue(user2_telegram_id)
@@ -233,6 +244,7 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                 return
             
             # Create chat room with preferred genders
+            logger.info(f"Creating chat room for {user1_telegram_id} and {user2_telegram_id}")
             chat_room = await chat_manager.create_chat(
                 user1.id, 
                 user2.id, 
@@ -240,6 +252,7 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                 user1_preferred_gender=user1_pref_gender,
                 user2_preferred_gender=user2_pref_gender
             )
+            logger.info(f"Chat room created: {chat_room.id}")
             
             # Log after creating chat room
             stored_user1_pref = await chat_manager.get_user_preferred_gender(chat_room.id, user1.id)
