@@ -143,10 +143,28 @@ async def search_users(
         
         return online_users
     else:
-        # Normal search - no online filter
+            # Normal search - we sort by online status
         query = query.order_by(User.created_at.desc()).offset(offset).limit(limit)
         result = await session.execute(query)
-        return list(result.scalars().all())
+        users = list(result.scalars().all())
+
+        if not activity_tracker:
+            return users  # fallback
+
+        # Make sortable list: (user, is_online, last_seen)
+        processed = []
+        for u in users:
+            is_online = await activity_tracker.is_online(u.telegram_id)
+            last_seen = u.last_seen
+            processed.append((u, is_online, last_seen))
+
+        # Sort:
+        # 1. Online first (is_online=True)
+        # 2. Then last_seen newest
+        processed.sort(key=lambda x: (not x[1], x[2] or 0))
+
+        # Return only the user objects (sorted)
+        return [u[0] for u in processed]
 
 
 async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
