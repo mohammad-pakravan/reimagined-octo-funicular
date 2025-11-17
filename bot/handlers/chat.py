@@ -313,46 +313,46 @@ async def add_user_to_queue_direct(
 ):
     """Helper function to add user to queue with filters and show status."""
     user_id = user.telegram_id
-        
-        # Check if user has premium
+    
+    # Check if user has premium
     from db.crud import check_user_premium, get_system_setting_value, get_user_points
-        user_premium = await check_user_premium(db_session, user.id)
-        
+    user_premium = await check_user_premium(db_session, user.id)
+    
     # Get filtered chat cost (non-refundable)
     from config.settings import settings
     filtered_chat_cost = settings.FILTERED_CHAT_COST
-        
-        user_points = await get_user_points(db_session, user.id)
-        
+    
+    user_points = await get_user_points(db_session, user.id)
+    
     # Check if user has enough coins for filtered chat
     if not user_premium and preferred_gender is not None and user_points < filtered_chat_cost:
-            from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
-            try:
-                await callback.message.edit_text(
-                    f"⚠️ سکه کافی نداری!\n\n"
+        from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
+        try:
+            await callback.message.edit_text(
+                f"⚠️ سکه کافی نداری!\n\n"
                 f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
-                    f"💎 سکه فعلی تو: {user_points}\n\n"
+                f"💎 سکه فعلی تو: {user_points}\n\n"
                 f"⚠️ توجه: این سکه برگشت داده نمی‌شود.\n\n"
-                    f"💡 می‌تونی:\n"
-                    f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
-                    f"• یا پریمیوم بگیری (چت رایگان)\n"
+                f"💡 می‌تونی:\n"
+                f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
+                f"• یا پریمیوم بگیری (چت رایگان)\n"
                 f"• یا «جستجوی شانسی» رو انتخاب کنی (رایگان)",
-                    reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
-                )
-            except:
-                await callback.message.answer(
-                    f"⚠️ سکه کافی نداری!\n\n"
+                reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
+            )
+        except:
+            await callback.message.answer(
+                f"⚠️ سکه کافی نداری!\n\n"
                 f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
-                    f"💎 سکه فعلی تو: {user_points}\n\n"
+                f"💎 سکه فعلی تو: {user_points}\n\n"
                 f"⚠️ توجه: این سکه برگشت داده نمی‌شود.\n\n"
-                    f"💡 می‌تونی:\n"
-                    f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
-                    f"• یا پریمیوم بگیری (چت رایگان)\n"
+                f"💡 می‌تونی:\n"
+                f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
+                f"• یا پریمیوم بگیری (چت رایگان)\n"
                 f"• یا «جستجوی شانسی» رو انتخاب کنی (رایگان)",
-                    reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
-                )
+                reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
+            )
         await state.clear()
-            return
+        return
         
     # Add user to queue
     import logging
@@ -365,37 +365,38 @@ async def add_user_to_queue_direct(
         if not existing_task.done():
             existing_task.cancel()
             logger.debug(f"Cancelled existing timeout task for user {user_id}")
-        await matchmaking_queue.add_user_to_queue(
-            user_id=user_id,
-            gender=user.gender,
-            city=user.city,
-            age=user.age,
-            preferred_gender=preferred_gender,
-            min_age=None,
-            max_age=None,
-            preferred_city=None,
+    
+    await matchmaking_queue.add_user_to_queue(
+        user_id=user_id,
+        gender=user.gender,
+        city=user.city,
+        age=user.age,
+        preferred_gender=preferred_gender,
+        min_age=None,
+        max_age=None,
+        preferred_city=None,
         filter_same_age=filter_same_age,
         filter_same_city=filter_same_city,
         filter_same_province=filter_same_province,
         province=user.province,
         is_premium=user_premium,
-        )
-        logger.info(f"DEBUG: User {user_id} added to queue successfully")
-        
-        from bot.keyboards.common import get_queue_status_keyboard
-        
-        # Helper function to generate cost summary
-        def get_search_cost_summary():
-            if user_premium:
-                return "💰 هزینه: رایگان (پریمیوم)"
-            elif preferred_gender is None:
+    )
+    logger.info(f"DEBUG: User {user_id} added to queue successfully")
+    
+    from bot.keyboards.common import get_queue_status_keyboard
+    
+    # Helper function to generate cost summary
+    def get_search_cost_summary():
+        if user_premium:
+            return "💰 هزینه: رایگان (پریمیوم)"
+        elif preferred_gender is None:
             return "💰 هزینه: رایگان (شانسی)"
         elif user_points < filtered_chat_cost:
             return f"⚠️ سکه کافی نداری ({filtered_chat_cost} سکه نیاز داری)"
-            else:
+        else:
             return f"💰 هزینه: {filtered_chat_cost} سکه (برگشت داده نمی‌شود)"
-        
-        cost_summary = get_search_cost_summary()
+    
+    cost_summary = get_search_cost_summary()
     
     # Build filter description
     filter_desc = []
@@ -432,31 +433,31 @@ async def add_user_to_queue_direct(
     
     # Build status info
     status_info = f"📊 چت‌های فعال: {active_chats_count} | 👥 آنلاین: {total_active_users}"
-        
-        # Build queue status message
-        if not user_premium:
-            queue_status_text = (
-                f"🔍 در حال جستجو...\n\n"
+    
+    # Build queue status message
+    if not user_premium:
+        queue_status_text = (
+            f"🔍 در حال جستجو...\n\n"
             f"{cost_summary}\n"
             f"🔎 فیلتر: {filter_text}\n"
             f"{status_info}\n\n"
-                f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم...\n\n"
-                f"💎✨ با پریمیوم تجربه بهتری داشته باش! ✨💎\n\n"
-                f"🎁 ویژگی‌های پریمیوم:\n"
-                f"✅ چت نامحدود بدون سکه و رایگان\n"
-                f"✅ درخواست تماس  نامحدود و رایگان\n"
-                f"✅ پیام دایرکت  نامحدود و رایگان\n"
-                f"✅ اولویت در صف (نفر اول صف)\n\n"
-                f"🚀💎 همین الان پریمیوم بخر و اول صف باش! 💎🚀"
-            )
-        else:
-            queue_status_text = (
-                f"🔍 در حال جستجو...\n\n"
+            f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم...\n\n"
+            f"💎✨ با پریمیوم تجربه بهتری داشته باش! ✨💎\n\n"
+            f"🎁 ویژگی‌های پریمیوم:\n"
+            f"✅ چت نامحدود بدون سکه و رایگان\n"
+            f"✅ درخواست تماس  نامحدود و رایگان\n"
+            f"✅ پیام دایرکت  نامحدود و رایگان\n"
+            f"✅ اولویت در صف (نفر اول صف)\n\n"
+            f"🚀💎 همین الان پریمیوم بخر و اول صف باش! 💎🚀"
+        )
+    else:
+        queue_status_text = (
+            f"🔍 در حال جستجو...\n\n"
             f"{cost_summary}\n"
             f"🔎 فیلتر: {filter_text}\n"
             f"{status_info}\n\n"
-                f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
-            )
+            f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
+        )
         
     try:
         await callback.message.edit_text(
@@ -910,7 +911,7 @@ async def check_matchmaking_timeout_with_virtual(
                 break
             else:
                 logger.info(f"User {user_id} has no active chat and not in queue, safe to proceed (user cancelled search)")
-        break
+            break
 
 
 async def check_matchmaking_timeout(user_id: int, telegram_id: int):
@@ -953,18 +954,18 @@ async def check_matchmaking_timeout(user_id: int, telegram_id: int):
             
             # User is still in queue and has no active chat, no match found
             logger.info(f"User {user_id} still in queue with no active chat after 120 seconds, sending timeout message")
-        # Remove from queue
-        await matchmaking_queue.remove_user_from_queue(user_id)
-        
-        # Notify user
-        bot = Bot(token=settings.BOT_TOKEN)
-        try:
-            await bot.send_message(
-                telegram_id,
-                "❌ متأسفانه کسی رو برات پیدا نکردیم.\n\n"
-                "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
-            )
-            await bot.session.close()
+            # Remove from queue
+            await matchmaking_queue.remove_user_from_queue(user_id)
+            
+            # Notify user
+            bot = Bot(token=settings.BOT_TOKEN)
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    "❌ متأسفانه کسی رو برات پیدا نکردیم.\n\n"
+                    "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
+                )
+                await bot.session.close()
                 logger.info(f"Timeout message sent to user {user_id}")
             except Exception as e:
                 logger.error(f"Failed to send timeout message to user {user_id}: {e}")
