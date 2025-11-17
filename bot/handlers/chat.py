@@ -755,22 +755,35 @@ async def check_matchmaking_timeout_with_virtual(
                     
                     user_points = await get_user_points(db_session, user.id)
                     
-                    # Don't deduct coins for virtual profile chats (they are considered unsuccessful)
-                    # Virtual profiles are just for engagement, user shouldn't pay for them
+                    # Deduct coins for virtual profile chats (same as real match)
                     user_coins_deducted = False
+                    if not user_premium and preferred_gender is not None and preferred_gender in ["male", "female"]:
+                        # Check if user has enough coins
+                        if user_points >= filtered_chat_cost:
+                            from db.crud import spend_points
+                            success = await spend_points(
+                                db_session,
+                                user.id,
+                                filtered_chat_cost,
+                                "spent",
+                                "filtered_chat",
+                                f"Cost for filtered chat with virtual profile (non-refundable)"
+                            )
+                            if success:
+                                user_coins_deducted = True
+                                user_points -= filtered_chat_cost
+                                logger.info(f"User {user_id}: Successfully deducted {filtered_chat_cost} coins for virtual profile chat, remaining: {user_points}")
                     
                     # Helper function to generate cost summary (same as matchmaking_worker)
-                    # For virtual profiles, always show as free (no coins deducted)
                     def get_match_cost_summary(is_premium, pref_gender, coins_deducted, cost, points):
-                        # For virtual profiles, show cost based on user's premium status and preference
-                        # Note: For virtual profiles, coins are NOT deducted, but we show the cost as if it was
                         if is_premium:
                             return "💰 هزینه: رایگان (پریمیوم)"
                         elif pref_gender is None:
                             return "💰 هزینه: رایگان (شانسی)"
-                        else:
-                            # User selected specific gender, show cost (even though not deducted for virtual)
+                        elif coins_deducted:
                             return f"💰 {cost} سکه کسر شد (باقی‌مانده: {points})"
+                        else:
+                            return f"⚠️ سکه کافی نداشتی ({cost} سکه نیاز داری)"
                     
                     # Send notification to user that they are connected (exactly like real match)
                     bot = Bot(token=settings.BOT_TOKEN)
@@ -831,10 +844,35 @@ async def check_matchmaking_timeout_with_virtual(
                         except (ValueError, TypeError):
                             filtered_chat_cost = 1  # Default fallback
                         
+                        # Check if coins were actually deducted for this chat
+                        # Check transaction history for "filtered_chat" transaction
+                        from db.models import PointsHistory
+                        from sqlalchemy import select, and_
+                        coins_were_deducted = False
+                        if not user_premium and preferred_gender is not None:
+                            # Check if there's a "filtered_chat" transaction for this user around chat start time
+                            chat_start_time = chat_room.created_at
+                            # Check transactions within 5 minutes of chat start
+                            from datetime import timedelta
+                            time_window_start = chat_start_time - timedelta(minutes=5)
+                            time_window_end = chat_start_time + timedelta(minutes=5)
+                            
+                            transaction_query = select(PointsHistory).where(
+                                and_(
+                                    PointsHistory.user_id == user.id,
+                                    PointsHistory.transaction_type == "spent",
+                                    PointsHistory.description.like("%filtered_chat%"),
+                                    PointsHistory.created_at >= time_window_start,
+                                    PointsHistory.created_at <= time_window_end
+                                )
+                            )
+                            result = await db_session.execute(transaction_query)
+                            transaction = result.scalar_one_or_none()
+                            if transaction:
+                                coins_were_deducted = True
+                        
                         # Helper function to generate cost summary (same as end_chat_confirm)
-                        # For virtual profiles, always show as free (no coins were deducted)
                         def get_cost_summary(is_premium, was_cost_deducted, pref_gender, coins_refunded, cost, current_points):
-                            # For virtual profiles, show "no refund" if user selected specific gender
                             if is_premium:
                                 return "💰 این چت رایگان بود (پریمیوم)"
                             elif pref_gender is None:
@@ -843,15 +881,12 @@ async def check_matchmaking_timeout_with_virtual(
                                 # User selected specific gender, show that coins were not refunded (non-refundable)
                                 return f"💰 {cost} سکه کسر شد"
                             else:
-                                # No coins deducted (shouldn't happen for virtual with specific gender)
+                                # No coins deducted
                                 return "💰 این چت رایگان بود"
                         
-                        # For virtual profile, check if coins should have been deducted (based on preferred_gender)
-                        # Even though we don't deduct for virtual, we show the cost/refund message
-                        should_have_deducted = (preferred_gender is not None and not user_premium)
                         user_cost_summary = get_cost_summary(
                             user_premium,
-                            should_have_deducted,  # Show as if coins were deducted if user selected specific gender
+                            coins_were_deducted,  # Use actual deduction status
                             preferred_gender,
                             False,  # No refund for virtual profiles (non-refundable)
                             filtered_chat_cost,

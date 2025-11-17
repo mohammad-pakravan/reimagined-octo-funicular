@@ -388,8 +388,8 @@ def get_user_search_keyboard(user) -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text="🗺️ هم استانی‌ها",
                 switch_inline_query_current_chat=f"search:province:{user.province}"
-            )
-        ])
+        )
+    ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

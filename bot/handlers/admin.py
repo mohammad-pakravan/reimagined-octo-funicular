@@ -529,14 +529,14 @@ async def process_broadcast_rate(message: Message, state: FSMContext):
                 f"⚙️ سرعت: {rate_per_minute} پیام/دقیقه\n"
                 f"⏱ تأخیر: {delay_seconds:.2f} ثانیه/پیام\n\n"
                 f"📊 آمار نهایی:\n"
-                f"• ارسال موفق: {sent_count}\n"
-                f"• ارسال ناموفق: {failed_count}\n"
+            f"• ارسال موفق: {sent_count}\n"
+            f"• ارسال ناموفق: {failed_count}\n"
                 f"• کل کاربران: {len(users)}\n"
                 f"• درصد موفقیت: {(sent_count/len(users)*100):.1f}%\n\n"
-                f"🔗 برای مشاهده آمار کامل:\n"
-                f"/admin_broadcast_stats {broadcast.id}",
+            f"🔗 برای مشاهده آمار کامل:\n"
+            f"/admin_broadcast_stats {broadcast.id}",
                 reply_markup=None
-            )
+        )
         except Exception:
             pass
         

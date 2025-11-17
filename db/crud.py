@@ -105,11 +105,11 @@ async def search_users(
         # This ensures consistent results across multiple pagination requests
         result = await session.execute(query)
         all_users = list(result.scalars().all())
-        
+            
         # Filter online users and prepare for sorting
         online_candidates = []
         for user in all_users:
-            if await activity_tracker.is_online(user.telegram_id):
+                if await activity_tracker.is_online(user.telegram_id):
                 last_seen = user.last_seen
                 created_at = user.created_at
                 online_candidates.append((user, last_seen, created_at))

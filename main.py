@@ -97,12 +97,12 @@ async def setup_matchmaking():
     # we only use Redis for other features (FSM, rate limiting, etc.).
     if not redis_client:
         redis_client = await setup_redis()
-
+    
     if getattr(settings, "MATCHMAKING_BACKEND", "redis") == "memory":
         matchmaking_queue = InMemoryMatchmakingQueue()
         logger.info("✅ Matchmaking queue initialized (in-memory backend)")
     else:
-        matchmaking_queue = MatchmakingQueue(redis_client)
+    matchmaking_queue = MatchmakingQueue(redis_client)
         logger.info("✅ Matchmaking queue initialized (redis backend)")
     
     return matchmaking_queue

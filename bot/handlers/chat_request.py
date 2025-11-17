@@ -304,28 +304,28 @@ async def confirm_chat_request_send(callback: CallbackQuery, state: FSMContext):
                 # Virtual profiles can't receive chat requests, skip notification
                 pass
             else:
-                # Send message with photo if available
-                if user.profile_image_url:
-                    try:
-                        await bot.send_photo(
-                            receiver.telegram_id,
-                            photo=user.profile_image_url,
-                            caption=profile_info,
-                            reply_markup=chat_request_keyboard
-                        )
-                    except Exception:
-                        # If photo fails, send text only
-                        await bot.send_message(
-                            receiver.telegram_id,
-                            profile_info,
-                            reply_markup=chat_request_keyboard
-                        )
-                else:
+            # Send message with photo if available
+            if user.profile_image_url:
+                try:
+                    await bot.send_photo(
+                        receiver.telegram_id,
+                        photo=user.profile_image_url,
+                        caption=profile_info,
+                        reply_markup=chat_request_keyboard
+                    )
+                except Exception:
+                    # If photo fails, send text only
                     await bot.send_message(
                         receiver.telegram_id,
                         profile_info,
                         reply_markup=chat_request_keyboard
                     )
+            else:
+                await bot.send_message(
+                    receiver.telegram_id,
+                    profile_info,
+                    reply_markup=chat_request_keyboard
+                )
             
             await bot.session.close()
         except Exception as e:
