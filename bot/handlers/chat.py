@@ -332,7 +332,7 @@ async def add_user_to_queue_direct(
                 f"⚠️ سکه کافی نداری!\n\n"
                 f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
                 f"💎 سکه فعلی تو: {user_points}\n\n"
-                f"⚠️ توجه: این سکه برگشت داده نمی‌شود.\n\n"
+                f""
                 f"💡 می‌تونی:\n"
                 f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
                 f"• یا پریمیوم بگیری (چت رایگان)\n"
@@ -344,7 +344,7 @@ async def add_user_to_queue_direct(
                 f"⚠️ سکه کافی نداری!\n\n"
                 f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
                 f"💎 سکه فعلی تو: {user_points}\n\n"
-                f"⚠️ توجه: این سکه برگشت داده نمی‌شود.\n\n"
+                f""
                 f"💡 می‌تونی:\n"
                 f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
                 f"• یا پریمیوم بگیری (چت رایگان)\n"
@@ -394,7 +394,7 @@ async def add_user_to_queue_direct(
         elif user_points < filtered_chat_cost:
             return f"⚠️ سکه کافی نداری ({filtered_chat_cost} سکه نیاز داری)"
         else:
-            return f"💰 هزینه: {filtered_chat_cost} سکه (برگشت داده نمی‌شود)"
+            return f"💰 هزینه: {filtered_chat_cost} سکه"
     
     cost_summary = get_search_cost_summary()
     
@@ -740,15 +740,11 @@ async def check_matchmaking_timeout_with_virtual(
                     logger.info(f"Created chat room {chat_room.id} between user {user.id} and virtual profile {virtual_profile.id} (user_id={virtual_profile.user_id})")
                     
                     # Get user premium status and cost info (like real matchmaking)
-                    from db.crud import check_user_premium, get_user_points, get_system_setting_value
+                    from db.crud import check_user_premium, get_user_points
                     user_premium = await check_user_premium(db_session, user.id)
                     
-                    # Get chat cost
-                    chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
-                    try:
-                        chat_cost = int(chat_cost_str)
-                    except (ValueError, TypeError):
-                        chat_cost = 3
+                    # Get filtered chat cost (same as real matchmaking)
+                    filtered_chat_cost = settings.FILTERED_CHAT_COST
                     
                     user_points = await get_user_points(db_session, user.id)
                     
@@ -758,22 +754,22 @@ async def check_matchmaking_timeout_with_virtual(
                     
                     # Helper function to generate cost summary (same as matchmaking_worker)
                     # For virtual profiles, always show as free (no coins deducted)
-                    def get_match_cost_summary(is_premium, pref_gender, coins_deducted, chat_cost, points):
+                    def get_match_cost_summary(is_premium, pref_gender, coins_deducted, cost, points):
                         # For virtual profiles, show cost based on user's premium status and preference
                         # Note: For virtual profiles, coins are NOT deducted, but we show the cost as if it was
                         if is_premium:
                             return "💰 هزینه: رایگان (پریمیوم)"
                         elif pref_gender is None:
-                            return "💰 هزینه: رایگان (همه)"
+                            return "💰 هزینه: رایگان (شانسی)"
                         else:
                             # User selected specific gender, show cost (even though not deducted for virtual)
-                            return f"💰 {chat_cost} سکه کسر شد (باقی‌مانده: {points})"
+                            return f"💰 {cost} سکه کسر شد (باقی‌مانده: {points})"
                     
                     # Send notification to user that they are connected (exactly like real match)
                     bot = Bot(token=settings.BOT_TOKEN)
                     try:
                         user_cost_summary = get_match_cost_summary(
-                            user_premium, preferred_gender, user_coins_deducted, chat_cost, user_points
+                            user_premium, preferred_gender, user_coins_deducted, filtered_chat_cost, user_points
                         )
                         
                         connection_msg = (
@@ -801,7 +797,7 @@ async def check_matchmaking_timeout_with_virtual(
                         bot = Bot(token=settings.BOT_TOKEN)
                         await bot.send_message(
                             telegram_id,
-                            "👀 پروفایلت مشاهده شد"
+                            "👁️ مخاطبت پروفایلت رو مشاهده کرد!"
                         )
                         await bot.session.close()
                     except Exception as e:
@@ -821,20 +817,20 @@ async def check_matchmaking_timeout_with_virtual(
                         user_premium = await check_user_premium(db_session, user.id)
                         user_current_points = await get_user_points(db_session, user.id)
                         
+                        # Get filtered chat cost
+                        filtered_chat_cost = settings.FILTERED_CHAT_COST
+                        
                         # Helper function to generate cost summary (same as end_chat_confirm)
                         # For virtual profiles, always show as free (no coins were deducted)
-                        def get_cost_summary(is_premium, was_cost_deducted, pref_gender, coins_refunded, chat_cost, current_points):
-                            # For virtual profiles, show refund if user selected specific gender
+                        def get_cost_summary(is_premium, was_cost_deducted, pref_gender, coins_refunded, cost, current_points):
+                            # For virtual profiles, show "no refund" if user selected specific gender
                             if is_premium:
                                 return "💰 این چت رایگان بود (پریمیوم)"
                             elif pref_gender is None:
-                                return "💰 این چت رایگان بود (همه)"
+                                return "💰 این چت رایگان بود (شانسی)"
                             elif was_cost_deducted:
-                                # User selected specific gender, show refund
-                                if coins_refunded:
-                                    return f"💰 {chat_cost} سکه برگشت داده شد"
-                                else:
-                                    return f"💰 {chat_cost} سکه کسر شد"
+                                # User selected specific gender, show that coins were not refunded (non-refundable)
+                                return f"💰 {cost} سکه کسر شد"
                             else:
                                 # No coins deducted (shouldn't happen for virtual with specific gender)
                                 return "💰 این چت رایگان بود"
@@ -846,8 +842,8 @@ async def check_matchmaking_timeout_with_virtual(
                             user_premium,
                             should_have_deducted,  # Show as if coins were deducted if user selected specific gender
                             preferred_gender,
-                            should_have_deducted,  # Show refund if coins should have been deducted
-                            chat_cost,
+                            False,  # No refund for virtual profiles (non-refundable)
+                            filtered_chat_cost,
                             user_current_points
                         )
                         

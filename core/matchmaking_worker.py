@@ -340,7 +340,7 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                 elif pref_gender is None:
                     return "💰 هزینه: رایگان (شانسی)"
                 elif coins_deducted:
-                    return f"💰 {cost} سکه کسر شد - برگشت داده نمی‌شود (باقی‌مانده: {points})"
+                    return f"💰 {cost} سکه کسر شد (باقی‌مانده: {points})"
                 else:
                     return f"⚠️ سکه کافی نداشتی ({cost} سکه نیاز داری)"
             

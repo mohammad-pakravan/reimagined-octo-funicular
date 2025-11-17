@@ -667,12 +667,15 @@ class InMemoryMatchmakingQueue:
             
             # If user explicitly wants a girl (paid/premium), match directly without probability
             if preferred_gender == "female":
+                logger.info(f"Boy {user_id} explicitly wants GIRL. Premium={entry.is_premium}, Boys in queue={len(self._boys_queue)}, Girls in queue={len(self._girls_queue)}")
                 # Premium users: SKIP boy-boy priority, match directly with girl if available
                 # This ensures premium users get immediate access to real girls
                 if entry.is_premium:
                     partner = await pick_from_queue(self._girls_queue, required_gender="female")
                     if partner:
-                        logger.info(f"Boy {user_id} (PREMIUM) matched with girl {partner} immediately (no boy-boy priority)")
+                        partner_entry = self._user_data.get(partner)
+                        partner_gender = partner_entry.gender if partner_entry else "unknown"
+                        logger.info(f"Boy {user_id} (PREMIUM) matched with user {partner} (gender={partner_gender}) immediately (no boy-boy priority)")
                         return partner
                     logger.debug(f"Boy {user_id} (PREMIUM) wants girl but no girl available, staying in queue")
                     return None
@@ -680,7 +683,9 @@ class InMemoryMatchmakingQueue:
                 # Non-premium users: Match with girl (no probability check for explicit preference)
                 partner = await pick_from_queue(self._girls_queue, required_gender="female")
                 if partner:
-                    logger.info(f"Boy {user_id} (non-premium) matched with girl {partner} (explicit preference)")
+                    partner_entry = self._user_data.get(partner)
+                    partner_gender = partner_entry.gender if partner_entry else "unknown"
+                    logger.info(f"Boy {user_id} (non-premium) matched with user {partner} (gender={partner_gender}) (explicit preference for GIRL)")
                     return partner
                 logger.debug(f"Boy {user_id} (non-premium) wants girl but no girl available, staying in queue")
                 return None
