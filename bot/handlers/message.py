@@ -133,6 +133,13 @@ async def handle_reply_message(message: Message, state: FSMContext):
             await message.answer("❌ هم‌چت شما یافت نشد.")
             return
         
+        # Check if partner is a virtual profile - don't send messages to virtual profiles
+        from db.crud import get_user_by_id
+        partner = await get_user_by_id(db_session, partner_id)
+        if partner and partner.is_virtual:
+            # Silently ignore messages to virtual profiles - simulate that they're not responding
+            return
+        
         # Get partner's Telegram ID
         partner_telegram_id = await chat_manager.get_partner_telegram_id(user.id, db_session)
         if not partner_telegram_id:
@@ -362,6 +369,13 @@ async def forward_message(message: Message, state: FSMContext):
         partner_id = await chat_manager.get_partner_id(user.id, db_session)
         if not partner_id:
             await message.answer("❌ هم‌چت شما یافت نشد.")
+            return
+        
+        # Check if partner is a virtual profile - don't send messages to virtual profiles
+        from db.crud import get_user_by_id
+        partner = await get_user_by_id(db_session, partner_id)
+        if partner and partner.is_virtual:
+            # Silently ignore messages to virtual profiles - simulate that they're not responding
             return
         
         # Get private mode status for this user
