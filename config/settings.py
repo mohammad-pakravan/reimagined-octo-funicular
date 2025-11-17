@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     FILTERED_CHAT_COST: int = Field(default=1, description="Cost in coins for filtered chat (e.g., boy->girl, girl->boy). Non-refundable. Random chat is free.")
     
     # Matchmaking worker configuration
-    MATCHMAKING_WORKER_INTERVAL: int = Field(default=1, description="Matchmaking worker check interval in seconds")
+    MATCHMAKING_WORKER_INTERVAL: float = Field(default=1.0, description="Matchmaking worker check interval in seconds (can be decimal like 0.1 for faster matching)")
     MATCHMAKING_WORKER_BATCH_SIZE: int = Field(default=5, description="Number of matches to process per worker cycle")
     MATCHMAKING_BACKEND: str = Field(
         default="redis",

@@ -288,7 +288,9 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             user2_coins_deducted = False
             
             # Check if user1 selected specific gender (not "all")
+            logger.info(f"User1 {user1_telegram_id}: premium={user1_premium}, pref_gender={user1_pref_gender}, points={user1_points}, cost={filtered_chat_cost}")
             if not user1_premium and user1_pref_gender is not None and user1_pref_gender in ["male", "female"]:
+                logger.info(f"User1 {user1_telegram_id}: Attempting to deduct {filtered_chat_cost} coins for filtered chat")
                 # Check if user has enough coins
                 if user1_points >= filtered_chat_cost:
                     success = await spend_points(
@@ -299,13 +301,19 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                         "filtered_chat",
                         f"Cost for filtered chat (non-refundable)"
                     )
+                    logger.info(f"User1 {user1_telegram_id}: spend_points result = {success}")
                     if success:
                         user1_coins_deducted = True
                         # NOTE: Do NOT call set_chat_cost_deducted because this is non-refundable
                         user1_points -= filtered_chat_cost
+                        logger.info(f"User1 {user1_telegram_id}: Successfully deducted {filtered_chat_cost} coins, remaining: {user1_points}")
+                else:
+                    logger.warning(f"User1 {user1_telegram_id}: Insufficient coins ({user1_points} < {filtered_chat_cost})")
             
             # Check if user2 selected specific gender (not "all")
+            logger.info(f"User2 {user2_telegram_id}: premium={user2_premium}, pref_gender={user2_pref_gender}, points={user2_points}, cost={filtered_chat_cost}")
             if not user2_premium and user2_pref_gender is not None and user2_pref_gender in ["male", "female"]:
+                logger.info(f"User2 {user2_telegram_id}: Attempting to deduct {filtered_chat_cost} coins for filtered chat")
                 # Check if user has enough coins
                 if user2_points >= filtered_chat_cost:
                     success = await spend_points(
@@ -316,10 +324,14 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                         "filtered_chat",
                         f"Cost for filtered chat (non-refundable)"
                     )
+                    logger.info(f"User2 {user2_telegram_id}: spend_points result = {success}")
                     if success:
                         user2_coins_deducted = True
                         # NOTE: Do NOT call set_chat_cost_deducted because this is non-refundable
                         user2_points -= filtered_chat_cost
+                        logger.info(f"User2 {user2_telegram_id}: Successfully deducted {filtered_chat_cost} coins, remaining: {user2_points}")
+                else:
+                    logger.warning(f"User2 {user2_telegram_id}: Insufficient coins ({user2_points} < {filtered_chat_cost})")
             
             # Helper function to generate cost summary for match found
             def get_match_cost_summary(is_premium, pref_gender, coins_deducted, cost, points):
