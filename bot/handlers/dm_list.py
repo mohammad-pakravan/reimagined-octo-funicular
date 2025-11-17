@@ -23,6 +23,7 @@ from db.crud import (
 from bot.keyboards.my_profile import get_direct_messages_list_keyboard
 from bot.keyboards.common import get_dm_reply_keyboard, get_dm_confirm_keyboard, get_dm_receive_keyboard
 from config.settings import settings
+from utils.validators import get_display_name
 
 router = Router()
 
@@ -90,7 +91,6 @@ async def view_direct_messages_from_list(callback: CallbackQuery):
         sender_profile_id = f"/user_{sender.profile_id}"
         
         # Show all messages
-        from utils.validators import get_display_name
         messages_text = f"✉️ پیام‌های دایرکت\n\n"
         messages_text += f"👤 از: {get_display_name(sender)}\n"
         messages_text += f"⚧️ جنسیت: {gender_text}\n"
@@ -325,8 +325,8 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             )
             if not success:
                 await callback.answer("❌ خطا در کسر سکه.", show_alert=True)
-            await state.clear()
-            return
+                await state.clear()
+                return
         
         # Create direct message (reply)
         dm = await create_direct_message(

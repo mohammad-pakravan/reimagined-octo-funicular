@@ -86,11 +86,20 @@ async def process_chat_gender_preference(callback: CallbackQuery, state: FSMCont
         
         # Check if user is already in queue
         if await matchmaking_queue.is_user_in_queue(user_id):
-            await callback.answer(
-                "⏳ در حال جستجو هستی ! 🔍\n\n"
-                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
-                show_alert=True
-            )
+            from bot.keyboards.common import get_cancel_search_keyboard
+            try:
+                await callback.message.edit_text(
+                    "⏳ در حال جستجو هستی ! 🔍\n\n"
+                    "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                    reply_markup=get_cancel_search_keyboard()
+                )
+            except:
+                await callback.message.answer(
+                    "⏳ در حال جستجو هستی ! 🔍\n\n"
+                    "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                    reply_markup=get_cancel_search_keyboard()
+                )
+            await callback.answer()
             return
         
         await callback.answer()
@@ -251,11 +260,20 @@ async def process_city_province_filters(callback: CallbackQuery, state: FSMConte
         
         # Check if user is already in queue
         if await matchmaking_queue.is_user_in_queue(user_id):
-            await callback.answer(
-                "⏳ در حال جستجو هستی ! 🔍\n\n"
-                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
-                show_alert=True
-            )
+            from bot.keyboards.common import get_cancel_search_keyboard
+            try:
+                await callback.message.edit_text(
+                    "⏳ در حال جستجو هستی ! 🔍\n\n"
+                    "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                    reply_markup=get_cancel_search_keyboard()
+                )
+            except:
+                await callback.message.answer(
+                    "⏳ در حال جستجو هستی ! 🔍\n\n"
+                    "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                    reply_markup=get_cancel_search_keyboard()
+                )
+            await callback.answer()
             return
         
         await callback.answer()

@@ -111,7 +111,6 @@ async def process_chat_request_message(message: Message, state: FSMContext):
         
         # If not premium, check if user has enough coins
         if not user_premium:
-            from config.settings import settings
             chat_request_cost = settings.CHAT_REQUEST_COST
             user_points = await get_user_points(db_session, user.id)
             if user_points < chat_request_cost:
@@ -237,7 +236,6 @@ async def confirm_chat_request_send(callback: CallbackQuery, state: FSMContext):
         
         # Deduct coin if not premium
         if not user_premium:
-            from config.settings import settings
             chat_request_cost = settings.CHAT_REQUEST_COST
             user_points = await get_user_points(db_session, user.id)
             if user_points < chat_request_cost:

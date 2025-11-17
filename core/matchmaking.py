@@ -649,7 +649,7 @@ class InMemoryMatchmakingQueue:
 
         # Boys: prefer boy-boy, then boy-girl
         if gender == "male":
-            logger.debug(f"Boy {user_id} looking for match. Boys in queue: {len(self._boys_queue)}, Girls in queue: {len(self._girls_queue)}, preferred_gender: {preferred_gender}")
+            logger.debug(f"Boy {user_id} looking for match. Boys in queue: {len(self._boys_queue)}, Girls in queue: {len(self._girls_queue)}, preferred_gender: {preferred_gender}, is_premium: {entry.is_premium}")
             
             # If user explicitly wants a girl (paid/premium), match directly without probability
             if preferred_gender == "female":
@@ -657,80 +657,104 @@ class InMemoryMatchmakingQueue:
                 if partner:
                     logger.info(f"Boy {user_id} matched with girl {partner} (explicit preference, no probability check)")
                     return partner
+                logger.debug(f"Boy {user_id} wants girl but no girl available, staying in queue")
                 return None
             
             # If user explicitly wants a boy, match with boy
             if preferred_gender == "male":
                 partner = await pick_from_queue(self._boys_queue)
                 if partner:
-                    logger.info(f"Boy {user_id} matched with boy {partner}")
+                    logger.info(f"Boy {user_id} matched with boy {partner} (explicit preference)")
                     return partner
+                logger.debug(f"Boy {user_id} wants boy but no boy available, staying in queue")
                 return None
             
             # If preferred_gender is None (random search), apply probability restriction (unless premium)
             # Try boy-boy first
             partner = await pick_from_queue(self._boys_queue)
             if partner:
-                logger.info(f"Boy {user_id} matched with boy {partner}")
+                logger.info(f"Boy {user_id} matched with boy {partner} (random search, boy-boy match)")
                 return partner
             # Then boy-girl
             # Premium users: no probability restriction even in random search
             # Non-premium users: check probability to make it harder (encouraging premium)
-            if entry.is_premium or random.random() < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+            if entry.is_premium:
                 partner = await pick_from_queue(self._girls_queue)
                 if partner:
-                    if entry.is_premium:
-                        logger.info(f"Boy {user_id} matched with girl {partner} (random search, premium user, no probability check)")
-                    else:
-                        logger.info(f"Boy {user_id} matched with girl {partner} (random search, probability check passed)")
+                    logger.info(f"Boy {user_id} matched with girl {partner} (random search, premium user, no probability check)")
                     return partner
+            else:
+                # Non-premium: check probability
+                probability_roll = random.random()
+                logger.debug(f"Boy {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
+                if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+                    partner = await pick_from_queue(self._girls_queue)
+                    if partner:
+                        logger.info(f"Boy {user_id} matched with girl {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
+                        return partner
+                else:
+                    logger.debug(f"Boy {user_id} probability check failed for girl match (random search, {probability_roll:.4f} >= {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}), staying in queue")
             # If probability check failed, stay in queue (will be checked again in next cycle)
-            logger.debug(f"Boy {user_id} probability check failed for girl match (random search), staying in queue")
             return None
 
         # Girls
         if gender == "female":
+            logger.debug(f"Girl {user_id} looking for match. Boys in queue: {len(self._boys_queue)}, Girls in queue: {len(self._girls_queue)}, preferred_gender: {preferred_gender}, is_premium: {entry.is_premium}")
+            
             # If user explicitly wants a boy (paid/premium), match directly without probability
             if preferred_gender == "male":
                 # If there is any boy-boy pair possible, give priority to them
                 if await self._exists_boy_boy_pair():
                     # Let worker handle boy-boy first; don't match this girl now
+                    logger.debug(f"Girl {user_id} wants boy but boy-boy pair exists, waiting for boy-boy to match first")
                     return None
                 # No boy-boy pair → match directly (no probability check for explicit preference)
                 partner = await pick_from_queue(self._boys_queue)
                 if partner:
                     logger.info(f"Girl {user_id} matched with boy {partner} (explicit preference, no probability check)")
                     return partner
-                # Fallback: match girl-girl if possible
-                partner = await pick_from_queue(self._girls_queue)
-                return partner
+                # No boy found, stay in queue and wait
+                logger.debug(f"Girl {user_id} wants boy but no boy available, staying in queue")
+                return None
             
             # If user explicitly wants a girl, match with girl
             if preferred_gender == "female":
                 partner = await pick_from_queue(self._girls_queue)
-                return partner
+                if partner:
+                    logger.info(f"Girl {user_id} matched with girl {partner} (explicit preference)")
+                    return partner
+                logger.debug(f"Girl {user_id} wants girl but no girl available, staying in queue")
+                return None
             
             # If preferred_gender is None (random search), apply probability restriction (unless premium)
             # If there is any boy-boy pair possible, give priority to them
             if await self._exists_boy_boy_pair():
                 # Let worker handle boy-boy first; don't match this girl now
+                logger.debug(f"Girl {user_id} random search but boy-boy pair exists, waiting for boy-boy to match first")
                 return None
             # No boy-boy pair → check probability before matching girl with boy (only for random search)
             # Premium users: no probability restriction even in random search
             # Non-premium users: check probability to make it harder (encouraging premium)
-            if entry.is_premium or random.random() < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+            if entry.is_premium:
                 partner = await pick_from_queue(self._boys_queue)
                 if partner:
-                    if entry.is_premium:
-                        logger.info(f"Girl {user_id} matched with boy {partner} (random search, premium user, no probability check)")
-                    else:
-                        logger.info(f"Girl {user_id} matched with boy {partner} (random search, probability check passed)")
+                    logger.info(f"Girl {user_id} matched with boy {partner} (random search, premium user, no probability check)")
                     return partner
+            else:
+                # Non-premium: check probability
+                probability_roll = random.random()
+                logger.debug(f"Girl {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
+                if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+                    partner = await pick_from_queue(self._boys_queue)
+                    if partner:
+                        logger.info(f"Girl {user_id} matched with boy {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
+                        return partner
+                else:
+                    logger.debug(f"Girl {user_id} probability check failed for boy match (random search, {probability_roll:.4f} >= {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}), staying in queue")
             # If probability check failed or no boy available, stay in queue
             # (will be checked again in next worker cycle)
-            # Fallback: match girl-girl if possible
-            partner = await pick_from_queue(self._girls_queue)
-            return partner
+            # Don't fallback to girl-girl in random search - wait for probability to pass
+            return None
 
         # Other / unknown genders: simple FIFO across all
         # Build a combined list preserving order (boys first, then girls)

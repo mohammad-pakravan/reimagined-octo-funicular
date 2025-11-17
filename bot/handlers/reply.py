@@ -50,9 +50,11 @@ async def start_chat_button(message: Message, state: FSMContext):
         # Check if user is already in queue
         from bot.handlers.chat import matchmaking_queue as mm_queue
         if mm_queue and await mm_queue.is_user_in_queue(user_id):
+            from bot.keyboards.common import get_cancel_search_keyboard
             await message.answer(
                 "⏳ در حال جستجو هستی ! 🔍\n\n"
-                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️"
+                "💡 اگه می‌خوای جستجوی جدیدی شروع کنی، اول جستجوی قبلی رو لغو کن ⏹️",
+                reply_markup=get_cancel_search_keyboard()
             )
             return
         

@@ -409,3 +409,13 @@ def get_chat_request_cancel_keyboard(requester_id: int, receiver_id: int) -> Inl
     ])
     return keyboard
 
+
+def get_cancel_search_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard for canceling current search."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⏹️ لغو جستجو", callback_data="chat:cancel_search"),
+        ],
+    ])
+    return keyboard
+

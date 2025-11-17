@@ -72,7 +72,6 @@ async def process_dm_message(message: Message, state: FSMContext):
         if user_premium:
             cost_text = "💎 این پیام رایگان است (پریمیوم)"
         else:
-            from config.settings import settings
             dm_cost = settings.DIRECT_MESSAGE_COST
             user_points = await get_user_points(db_session, user.id)
             if user_points < dm_cost:
@@ -144,7 +143,6 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
         
         # Deduct coin if not premium
         if not user_premium:
-            from config.settings import settings
             dm_cost = settings.DIRECT_MESSAGE_COST
             user_points = await get_user_points(db_session, user.id)
             if user_points < dm_cost:
@@ -163,8 +161,8 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             )
             if not success:
                 await callback.answer("❌ خطا در کسر سکه.", show_alert=True)
-            await state.clear()
-            return
+                await state.clear()
+                return
         
         # Create direct message
         dm = await create_direct_message(
