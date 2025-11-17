@@ -105,6 +105,12 @@ async def process_chat_request_message(message: Message, state: FSMContext):
             await state.clear()
             return
         
+        # Check if receiver is a virtual profile (cannot send chat request to virtual profiles)
+        if receiver.is_virtual:
+            await message.answer("❌ امکان ارسال درخواست چت به این پروفایل وجود ندارد.")
+            await state.clear()
+            return
+        
         # Check if user has premium
         from db.crud import check_user_premium, get_user_points
         user_premium = await check_user_premium(db_session, user.id)
@@ -293,28 +299,33 @@ async def confirm_chat_request_send(callback: CallbackQuery, state: FSMContext):
             from bot.keyboards.common import get_chat_request_keyboard
             chat_request_keyboard = get_chat_request_keyboard(user.id, user.id)
             
-            # Send message with photo if available
-            if user.profile_image_url:
-                try:
-                    await bot.send_photo(
-                        receiver.telegram_id,
-                        photo=user.profile_image_url,
-                        caption=profile_info,
-                        reply_markup=chat_request_keyboard
-                    )
-                except Exception:
-                    # If photo fails, send text only
+            # Check if receiver is virtual profile (telegram_id is negative)
+            if receiver.is_virtual or receiver.telegram_id < 0:
+                # Virtual profiles can't receive chat requests, skip notification
+                pass
+            else:
+                # Send message with photo if available
+                if user.profile_image_url:
+                    try:
+                        await bot.send_photo(
+                            receiver.telegram_id,
+                            photo=user.profile_image_url,
+                            caption=profile_info,
+                            reply_markup=chat_request_keyboard
+                        )
+                    except Exception:
+                        # If photo fails, send text only
+                        await bot.send_message(
+                            receiver.telegram_id,
+                            profile_info,
+                            reply_markup=chat_request_keyboard
+                        )
+                else:
                     await bot.send_message(
                         receiver.telegram_id,
                         profile_info,
                         reply_markup=chat_request_keyboard
                     )
-            else:
-                await bot.send_message(
-                    receiver.telegram_id,
-                    profile_info,
-                    reply_markup=chat_request_keyboard
-                )
             
             await bot.session.close()
         except Exception as e:

@@ -1,64 +1,124 @@
 version: '3.8'
 
-# Docker Compose override for testing
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.test.yml run --rm test
-
 services:
-  test:
+  redis:
+    image: redis:7-alpine
+    container_name: telecaht_test_redis
+    ports:
+      - "6898:6379"  # Changed from 6899
+    volumes:
+      - redis_test_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - telecaht_test_network
+
+  mysql:
+    image: mysql:8.0
+    container_name: telecaht_test_mysql
+    ports:
+      - "13306:3306"  # Changed from 3306
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD_TEST:-test_rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE_TEST:-telecaht_test}
+      MYSQL_USER: ${MYSQL_USER_TEST:-test_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD_TEST:-test_pass}
+    volumes:
+      - mysql_test_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./db/migration_add_profile_features.sql:/docker-entrypoint-initdb.d/migration_add_profile_features.sql
+      - ./db/migration_add_direct_messages.sql:/docker-entrypoint-initdb.d/migration_add_direct_messages.sql
+      - ./db/migration_add_chat_end_notifications.sql:/docker-entrypoint-initdb.d/migration_add_chat_end_notifications.sql
+      - ./db/migration_add_engagement_features.sql:/docker-entrypoint-initdb.d/migration_add_engagement_features.sql
+      - ./db/migration_add_admin_features.sql:/docker-entrypoint-initdb.d/migration_add_admin_features.sql
+      - ./db/migration_add_last_seen.sql:/docker-entrypoint-initdb.d/migration_add_last_seen.sql
+    restart: unless-stopped
+    networks:
+      - telecaht_test_network
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
+
+  phpmyadmin:
+    image: linuxserver/phpmyadmin:latest
+    container_name: telecaht_test_phpmyadmin
+    ports:
+      - "8081:80"  # Changed from 8080
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: ${MYSQL_USER_TEST:-test_user}
+      PMA_PASSWORD: ${MYSQL_PASSWORD_TEST:-test_pass}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD_TEST:-test_rootpass}
+      UPLOAD_LIMIT: 300M
+      PMA_ARBITRARY: 1
+    depends_on:
+      - mysql
+    restart: unless-stopped
+    networks:
+      - telecaht_test_network
+
+  bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: telecaht_test
+    container_name: telecaht_test_bot
+    ports:
+      - "8001:8000"  # Changed from 8000
     environment:
-      # Bot configuration (not needed for tests, but required)
-      BOT_TOKEN: ${BOT_TOKEN:-test_token}
+      # Bot configuration
+      BOT_TOKEN: ${BOT_TOKEN_TEST}
       # Database configuration
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_USER: ${MYSQL_USER:-telecaht_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-telecaht_pass}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-telecaht}
+      MYSQL_USER: ${MYSQL_USER_TEST:-test_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD_TEST:-test_pass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE_TEST:-telecaht_test}
       # Redis configuration
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_DB: ${REDIS_DB:-0}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      # MinIO configuration
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-profile-images}
-      MINIO_USE_SSL: "false"
+      REDIS_DB: ${REDIS_DB_TEST:-1}
+      REDIS_PASSWORD: ${REDIS_PASSWORD_TEST:-}
+      # MinIO configuration (external server)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT_TEST}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL_TEST}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY_TEST}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY_TEST}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME_TEST:-test-profile-images}
+      MINIO_USE_SSL: ${MINIO_USE_SSL_TEST:-false}
       # Channel configuration
-      MANDATORY_CHANNEL_ID: ${MANDATORY_CHANNEL_ID:-test_channel}
+      MANDATORY_CHANNEL_ID: ${MANDATORY_CHANNEL_ID_TEST}
       # Admin configuration
-      ADMIN_IDS: ${ADMIN_IDS:-123456789}
+      ADMIN_IDS: ${ADMIN_IDS_TEST}
       # FastAPI configuration
       API_HOST: 0.0.0.0
       API_PORT: 8000
-      VIDEO_CALL_DOMAIN: ${VIDEO_CALL_DOMAIN:-http://localhost:3000}
-      VIDEO_CALL_API_URL: ${VIDEO_CALL_API_URL:-http://bot:8000}
-      VIDEO_CALL_WS_URL: ${VIDEO_CALL_WS_URL:-ws://bot:8000}
-      API_SECRET_KEY: ${API_SECRET_KEY:-test-secret-key}
+      VIDEO_CALL_DOMAIN: ${VIDEO_CALL_DOMAIN_TEST:-http://localhost:3000}
+      VIDEO_CALL_API_URL: ${VIDEO_CALL_API_URL_TEST:-http://bot:8000}
+      VIDEO_CALL_WS_URL: ${VIDEO_CALL_WS_URL_TEST:-ws://bot:8000}
+      API_SECRET_KEY: ${API_SECRET_KEY_TEST:-test-secret-key-change-this}
       DOCKER_ENV: "1"
       # Premium configuration
-      PREMIUM_PRICE: ${PREMIUM_PRICE:-10000.0}
-      PREMIUM_DURATION_DAYS: ${PREMIUM_DURATION_DAYS:-30}
+      PREMIUM_PRICE: ${PREMIUM_PRICE_TEST:-5000.0}
+      PREMIUM_DURATION_DAYS: ${PREMIUM_DURATION_DAYS_TEST:-30}
       # Chat configuration
-      MAX_CHAT_DURATION_MINUTES: ${MAX_CHAT_DURATION_MINUTES:-60}
-      PREMIUM_CHAT_DURATION_MINUTES: ${PREMIUM_CHAT_DURATION_MINUTES:-180}
-      MATCHMAKING_TIMEOUT_SECONDS: ${MATCHMAKING_TIMEOUT_SECONDS:-300}
+      MAX_CHAT_DURATION_MINUTES: ${MAX_CHAT_DURATION_MINUTES_TEST:-60}
+      PREMIUM_CHAT_DURATION_MINUTES: ${PREMIUM_CHAT_DURATION_MINUTES_TEST:-180}
+      MATCHMAKING_TIMEOUT_SECONDS: ${MATCHMAKING_TIMEOUT_SECONDS_TEST:-300}
       # Rate limiting
-      RATE_LIMIT_MESSAGES_PER_MINUTE: ${RATE_LIMIT_MESSAGES_PER_MINUTE:-20}
+      RATE_LIMIT_MESSAGES_PER_MINUTE: ${RATE_LIMIT_MESSAGES_PER_MINUTE_TEST:-20}
     volumes:
       - .:/app
     depends_on:
       - redis
       - mysql
+    restart: unless-stopped
     networks:
-      - telecaht_network
-    command: pytest
-    profiles:
-      - test
+      - telecaht_test_network
 
 
+volumes:
+  redis_test_data:
+  mysql_test_data:
+
+networks:
+  telecaht_test_network:
+    driver: bridge

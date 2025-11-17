@@ -64,6 +64,12 @@ async def process_dm_message(message: Message, state: FSMContext):
             await state.clear()
             return
         
+        # Check if receiver is a virtual profile (cannot send DM to virtual profiles)
+        if receiver.is_virtual:
+            await message.answer("❌ امکان ارسال پیام دایرکت به این پروفایل وجود ندارد.")
+            await state.clear()
+            return
+        
         # Check if user has premium
         from db.crud import check_user_premium, get_user_points
         user_premium = await check_user_premium(db_session, user.id)
@@ -161,8 +167,8 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             )
             if not success:
                 await callback.answer("❌ خطا در کسر سکه.", show_alert=True)
-                await state.clear()
-                return
+            await state.clear()
+            return
         
         # Create direct message
         dm = await create_direct_message(
@@ -189,15 +195,20 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             # Get user profile ID
             user_profile_id = f"/user_{user.profile_id}"
             
-            await bot.send_message(
-                receiver.telegram_id,
-                f"✉️ یک پیام دایرکت از {get_display_name(user)} داری!\n\n"
-                f"👤 نام: {get_display_name(user)}\n"
-                f"⚧️ جنسیت: {gender_text}\n"
-                f"🆔 ID: {user_profile_id}\n\n"
-                f"برای مشاهده پیام از دکمه زیر استفاده کن:",
-                reply_markup=get_dm_receive_keyboard(dm.id)
-            )
+            # Check if receiver is virtual profile (telegram_id is negative)
+            if receiver.is_virtual or receiver.telegram_id < 0:
+                # Virtual profiles can't receive messages, skip notification
+                pass
+            else:
+                await bot.send_message(
+                    receiver.telegram_id,
+                    f"✉️ یک پیام دایرکت از {get_display_name(user)} داری!\n\n"
+                    f"👤 نام: {get_display_name(user)}\n"
+                    f"⚧️ جنسیت: {gender_text}\n"
+                    f"🆔 ID: {user_profile_id}\n\n"
+                    f"برای مشاهده پیام از دکمه زیر استفاده کن:",
+                    reply_markup=get_dm_receive_keyboard(dm.id)
+                )
             await bot.session.close()
         except Exception as e:
             # If bot can't send message (user blocked bot, etc.), still save the message

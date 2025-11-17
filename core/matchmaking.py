@@ -622,7 +622,14 @@ class InMemoryMatchmakingQueue:
             return True
 
         # Helper to actually pick and reserve a partner from a given queue
-        async def pick_from_queue(queue: List[int]) -> Optional[int]:
+        async def pick_from_queue(queue: List[int], required_gender: Optional[str] = None) -> Optional[int]:
+            """
+            Pick a partner from queue.
+            
+            Args:
+                queue: The queue to pick from (boys or girls)
+                required_gender: If specified, only match with this gender
+            """
             for candidate_id in list(queue):
                 if candidate_id == user_id:
                     continue
@@ -631,8 +638,14 @@ class InMemoryMatchmakingQueue:
                     queue.remove(candidate_id)
                     continue
                 
-                # Check filters
                 candidate_entry = self._user_data[candidate_id]
+                
+                # Check if candidate matches required gender (if specified)
+                if required_gender and candidate_entry.gender != required_gender:
+                    logger.debug(f"Skipping candidate {candidate_id}: gender mismatch (required={required_gender}, actual={candidate_entry.gender})")
+                    continue
+                
+                # Check filters
                 if not matches_filters(entry, candidate_entry):
                     continue  # Skip this candidate, try next
                 
@@ -654,16 +667,27 @@ class InMemoryMatchmakingQueue:
             
             # If user explicitly wants a girl (paid/premium), match directly without probability
             if preferred_gender == "female":
-                partner = await pick_from_queue(self._girls_queue)
+                # Premium users: SKIP boy-boy priority, match directly with girl if available
+                # This ensures premium users get immediate access to real girls
+                if entry.is_premium:
+                    partner = await pick_from_queue(self._girls_queue, required_gender="female")
+                    if partner:
+                        logger.info(f"Boy {user_id} (PREMIUM) matched with girl {partner} immediately (no boy-boy priority)")
+                        return partner
+                    logger.debug(f"Boy {user_id} (PREMIUM) wants girl but no girl available, staying in queue")
+                    return None
+                
+                # Non-premium users: Match with girl (no probability check for explicit preference)
+                partner = await pick_from_queue(self._girls_queue, required_gender="female")
                 if partner:
-                    logger.info(f"Boy {user_id} matched with girl {partner} (explicit preference, no probability check)")
+                    logger.info(f"Boy {user_id} (non-premium) matched with girl {partner} (explicit preference)")
                     return partner
-                logger.debug(f"Boy {user_id} wants girl but no girl available, staying in queue")
+                logger.debug(f"Boy {user_id} (non-premium) wants girl but no girl available, staying in queue")
                 return None
             
             # If user explicitly wants a boy, match with boy
             if preferred_gender == "male":
-                partner = await pick_from_queue(self._boys_queue)
+                partner = await pick_from_queue(self._boys_queue, required_gender="male")
                 if partner:
                     logger.info(f"Boy {user_id} matched with boy {partner} (explicit preference)")
                     return partner
@@ -672,7 +696,7 @@ class InMemoryMatchmakingQueue:
             
             # If preferred_gender is None (random search), apply probability restriction (unless premium)
             # Try boy-boy first
-            partner = await pick_from_queue(self._boys_queue)
+            partner = await pick_from_queue(self._boys_queue, required_gender="male")
             if partner:
                 logger.info(f"Boy {user_id} matched with boy {partner} (random search, boy-boy match)")
                 return partner
@@ -680,7 +704,7 @@ class InMemoryMatchmakingQueue:
             # Premium users: no probability restriction even in random search
             # Non-premium users: check probability to make it harder (encouraging premium)
             if entry.is_premium:
-                partner = await pick_from_queue(self._girls_queue)
+                partner = await pick_from_queue(self._girls_queue, required_gender="female")
                 if partner:
                     logger.info(f"Boy {user_id} matched with girl {partner} (random search, premium user, no probability check)")
                     return partner
@@ -695,7 +719,7 @@ class InMemoryMatchmakingQueue:
                     entry.last_probability_check = current_time  # Update timestamp
                     logger.debug(f"Boy {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
                     if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
-                        partner = await pick_from_queue(self._girls_queue)
+                        partner = await pick_from_queue(self._girls_queue, required_gender="female")
                         if partner:
                             logger.info(f"Boy {user_id} matched with girl {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
                             return partner
@@ -719,7 +743,7 @@ class InMemoryMatchmakingQueue:
                     logger.debug(f"Girl {user_id} wants boy but boy-boy pair exists, waiting for boy-boy to match first")
                     return None
                 # No boy-boy pair → match directly (no probability check for explicit preference)
-                partner = await pick_from_queue(self._boys_queue)
+                partner = await pick_from_queue(self._boys_queue, required_gender="male")
                 if partner:
                     logger.info(f"Girl {user_id} matched with boy {partner} (explicit preference, no probability check)")
                     return partner
@@ -729,7 +753,7 @@ class InMemoryMatchmakingQueue:
             
             # If user explicitly wants a girl, match with girl
             if preferred_gender == "female":
-                partner = await pick_from_queue(self._girls_queue)
+                partner = await pick_from_queue(self._girls_queue, required_gender="female")
                 if partner:
                     logger.info(f"Girl {user_id} matched with girl {partner} (explicit preference)")
                     return partner
@@ -746,7 +770,7 @@ class InMemoryMatchmakingQueue:
             # Premium users: no probability restriction even in random search
             # Non-premium users: check probability to make it harder (encouraging premium)
             if entry.is_premium:
-                partner = await pick_from_queue(self._boys_queue)
+                partner = await pick_from_queue(self._boys_queue, required_gender="male")
                 if partner:
                     logger.info(f"Girl {user_id} matched with boy {partner} (random search, premium user, no probability check)")
                     return partner
@@ -761,7 +785,7 @@ class InMemoryMatchmakingQueue:
                     entry.last_probability_check = current_time  # Update timestamp
                     logger.debug(f"Girl {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
                     if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
-                        partner = await pick_from_queue(self._boys_queue)
+                        partner = await pick_from_queue(self._boys_queue, required_gender="male")
                         if partner:
                             logger.info(f"Girl {user_id} matched with boy {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
                             return partner

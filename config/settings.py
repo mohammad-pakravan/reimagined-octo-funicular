@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     # Cost configuration
     CHAT_REQUEST_COST: int = Field(default=1, description="Cost in coins for sending a chat request (non-premium users)")
     DIRECT_MESSAGE_COST: int = Field(default=1, description="Cost in coins for sending a direct message (non-premium users)")
+    FILTERED_CHAT_COST: int = Field(default=1, description="Cost in coins for filtered chat (e.g., boy->girl, girl->boy). Non-refundable. Random chat is free.")
     
     # Matchmaking worker configuration
     MATCHMAKING_WORKER_INTERVAL: int = Field(default=1, description="Matchmaking worker check interval in seconds")
@@ -127,12 +128,24 @@ class Settings(BaseSettings):
     
     # Matchmaking probability configuration
     RANDOM_GIRL_BOY_MATCH_PROBABILITY: float = Field(
-        default=0.3,
-        description="Probability (0.0-1.0) for girls to match with boys in random chat when no boy-boy pairs exist. Lower = harder for girls to match with boys."
+        default=0.005,
+        description="Probability (0.0-1.0) for non-premium users to match with opposite gender in random chat. Lower = harder to match (encourages premium). 0.005 = 0.5% chance per check (with 30s cooldown)."
     )
     PROBABILITY_CHECK_COOLDOWN_SECONDS: int = Field(
         default=30,
         description="Cooldown in seconds between probability checks for the same user. Prevents rapid retries that would make 2% probability effectively much higher."
+    )
+    VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS: int = Field(
+        default=40,
+        description="Minimum timeout in seconds before creating a virtual profile for boys searching for girls."
+    )
+    VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS: int = Field(
+        default=50,
+        description="Maximum timeout in seconds before creating a virtual profile for boys searching for girls."
+    )
+    VIRTUAL_PROFILE_POOL_SIZE: int = Field(
+        default=10,
+        description="Number of pre-created virtual profiles to maintain in the pool. When a virtual profile is needed, one is selected from this pool."
     )
     
     # No-rematch rule configuration

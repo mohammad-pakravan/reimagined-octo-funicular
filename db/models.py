@@ -11,6 +11,33 @@ from sqlalchemy.orm import relationship
 Base = declarative_base()
 
 
+class VirtualProfile(Base):
+    """Virtual profile model for engagement (fake profiles for matchmaking)."""
+    __tablename__ = "virtual_profiles"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)  # Link to User table
+    display_name = Column(String(255), nullable=False)  # نام نمایشی
+    age = Column(Integer, nullable=False)
+    province = Column(String(255), nullable=False)  # استان
+    city = Column(String(255), nullable=False)  # شهر
+    profile_image_url = Column(String(512), nullable=True)  # عکس پروفایل
+    like_count = Column(Integer, default=0, nullable=False)  # تعداد لایک‌ها
+    profile_id = Column(String(50), unique=True, nullable=False, index=True)  # Public profile ID
+    
+    # Tracking
+    is_active = Column(Boolean, default=True, nullable=False)
+    usage_count = Column(Integer, default=0, nullable=False)  # تعداد دفعات استفاده
+    last_used_at = Column(DateTime, nullable=True)  # آخرین بار استفاده
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    # Relationship
+    user = relationship("User", back_populates="virtual_profile")
+
+
 class User(Base):
     """User model for storing user profiles and information."""
     __tablename__ = "users"
@@ -36,6 +63,7 @@ class User(Base):
     # Account status
     is_banned = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_virtual = Column(Boolean, default=False, nullable=False)  # Virtual/bot profile for engagement
     
     # Chat filter preferences (default settings)
     default_chat_filter_same_age = Column(Boolean, default=True, nullable=False)  # Default: filter by same age (±3 years)
@@ -69,6 +97,7 @@ class User(Base):
     badges = relationship("UserBadge", back_populates="user")
     achievements = relationship("UserAchievement", back_populates="user")
     challenges = relationship("UserChallenge", back_populates="user")
+    virtual_profile = relationship("VirtualProfile", back_populates="user", uselist=False)
 
     __table_args__ = (
         Index('idx_telegram_id', 'telegram_id'),

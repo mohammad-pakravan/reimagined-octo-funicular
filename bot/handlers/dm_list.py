@@ -325,8 +325,8 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             )
             if not success:
                 await callback.answer("❌ خطا در کسر سکه.", show_alert=True)
-                await state.clear()
-                return
+            await state.clear()
+            return
         
         # Create direct message (reply)
         dm = await create_direct_message(

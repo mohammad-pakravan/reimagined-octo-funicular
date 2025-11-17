@@ -497,6 +497,11 @@ async def handle_dm(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
             return
         
+        # Check if partner is a virtual profile (cannot send DM to virtual profiles)
+        if partner.is_virtual:
+            await callback.answer("❌ امکان ارسال پیام دایرکت به این پروفایل وجود ندارد.", show_alert=True)
+            return
+        
         # Check if partner has blocked user
         partner_blocked_user = await is_blocked(db_session, partner.id, user.id)
         if partner_blocked_user:
@@ -532,6 +537,11 @@ async def handle_chat_request(callback: CallbackQuery, state: FSMContext):
         partner = await get_user_by_id(db_session, partner_id)
         if not partner:
             await callback.answer("❌ پروفایل یافت نشد.", show_alert=True)
+            return
+        
+        # Check if partner is a virtual profile (cannot send chat request to virtual profiles)
+        if partner.is_virtual:
+            await callback.answer("❌ امکان ارسال درخواست چت به این پروفایل وجود ندارد.", show_alert=True)
             return
         
         # Check if partner has blocked user

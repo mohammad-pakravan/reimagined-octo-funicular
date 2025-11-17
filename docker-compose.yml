@@ -73,7 +73,7 @@ services:
       # Bot configuration
       BOT_TOKEN: ${BOT_TOKEN}
       # Database configuration
-      MYSQL_HOST: mysql
+      MYSQL_HOST: 91.107.169.235
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER:-telecaht_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-telecaht_pass}
@@ -115,7 +115,6 @@ services:
       - .:/app
     depends_on:
       - redis
-      - mysql
     restart: unless-stopped
     networks:
       - telecaht_network

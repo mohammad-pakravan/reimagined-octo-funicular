@@ -46,11 +46,11 @@ async def check_and_match_users():
     all_users = await matchmaking_queue.get_total_queue_count()
     if all_users < 2:
         return  # Need at least 2 users to match
-
+    
     processed_users = set()
     matches_found = []
     batch_size = settings.MATCHMAKING_WORKER_BATCH_SIZE
-
+    
     # Collect potential matches using abstract queue API (works for Redis and in-memory)
     user_ids = await matchmaking_queue.get_all_user_ids()
     for user_id in user_ids:
@@ -58,7 +58,7 @@ async def check_and_match_users():
         # Skip if already processed in this cycle
         if user_id in processed_users:
             continue
-
+        
         # Check if user is still in queue (might have been matched)
         if not await matchmaking_queue.is_user_in_queue(user_id):
             continue
@@ -273,67 +273,64 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             user1_premium = await check_user_premium(db_session, user1.id)
             user2_premium = await check_user_premium(db_session, user2.id)
             
-            # Get chat cost from system settings
-            chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
-            try:
-                chat_cost = int(chat_cost_str)
-            except (ValueError, TypeError):
-                chat_cost = 3
+            # Get filtered chat cost from settings (non-refundable)
+            filtered_chat_cost = settings.FILTERED_CHAT_COST
             
             # Get user points
             user1_points = await get_user_points(db_session, user1.id)
             user2_points = await get_user_points(db_session, user2.id)
             
-            # Deduct coins for non-premium users
-            # Simple logic: if preferred_gender is "male" or "female", deduct coins
-            # If preferred_gender is None (meaning "all"), don't deduct coins
+            # Deduct coins for non-premium users with filtered chat
+            # NEW LOGIC: 
+            # - If preferred_gender is "male" or "female" (filtered) -> deduct FILTERED_CHAT_COST (NON-REFUNDABLE)
+            # - If preferred_gender is None (random) -> FREE
             user1_coins_deducted = False
             user2_coins_deducted = False
             
             # Check if user1 selected specific gender (not "all")
             if not user1_premium and user1_pref_gender is not None and user1_pref_gender in ["male", "female"]:
                 # Check if user has enough coins
-                if user1_points >= chat_cost:
+                if user1_points >= filtered_chat_cost:
                     success = await spend_points(
                         db_session,
                         user1.id,
-                        chat_cost,
+                        filtered_chat_cost,
                         "spent",
-                        "chat_start",
-                        f"Cost for starting chat (will be refunded if chat unsuccessful)"
+                        "filtered_chat",
+                        f"Cost for filtered chat (non-refundable)"
                     )
                     if success:
                         user1_coins_deducted = True
-                        await chat_manager.set_chat_cost_deducted(chat_room.id, user1.id, True)
-                        user1_points -= chat_cost
+                        # NOTE: Do NOT call set_chat_cost_deducted because this is non-refundable
+                        user1_points -= filtered_chat_cost
             
             # Check if user2 selected specific gender (not "all")
             if not user2_premium and user2_pref_gender is not None and user2_pref_gender in ["male", "female"]:
                 # Check if user has enough coins
-                if user2_points >= chat_cost:
+                if user2_points >= filtered_chat_cost:
                     success = await spend_points(
                         db_session,
                         user2.id,
-                        chat_cost,
+                        filtered_chat_cost,
                         "spent",
-                        "chat_start",
-                        f"Cost for starting chat (will be refunded if chat unsuccessful)"
+                        "filtered_chat",
+                        f"Cost for filtered chat (non-refundable)"
                     )
                     if success:
                         user2_coins_deducted = True
-                        await chat_manager.set_chat_cost_deducted(chat_room.id, user2.id, True)
-                        user2_points -= chat_cost
+                        # NOTE: Do NOT call set_chat_cost_deducted because this is non-refundable
+                        user2_points -= filtered_chat_cost
             
             # Helper function to generate cost summary for match found
-            def get_match_cost_summary(is_premium, pref_gender, coins_deducted, chat_cost, points):
+            def get_match_cost_summary(is_premium, pref_gender, coins_deducted, cost, points):
                 if is_premium:
                     return "💰 هزینه: رایگان (پریمیوم)"
                 elif pref_gender is None:
-                    return "💰 هزینه: رایگان (همه)"
+                    return "💰 هزینه: رایگان (شانسی)"
                 elif coins_deducted:
-                    return f"💰 {chat_cost} سکه کسر شد (باقی‌مانده: {points})"
+                    return f"💰 {cost} سکه کسر شد - برگشت داده نمی‌شود (باقی‌مانده: {points})"
                 else:
-                    return f"⚠️ سکه کافی نداشتی ({chat_cost} سکه نیاز داری)"
+                    return f"⚠️ سکه کافی نداشتی ({cost} سکه نیاز داری)"
             
             # Log for debugging - IMPORTANT: log the actual values
             logger.info(f"User {user1_telegram_id} - premium: {user1_premium}, pref_gender: {user1_pref_gender}, coins_deducted: {user1_coins_deducted}, points: {user1_points}")
@@ -341,10 +338,10 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             
             # Prepare messages with beautiful UI
             user1_cost_summary = get_match_cost_summary(
-                user1_premium, user1_pref_gender, user1_coins_deducted, chat_cost, user1_points
+                user1_premium, user1_pref_gender, user1_coins_deducted, filtered_chat_cost, user1_points
             )
             user2_cost_summary = get_match_cost_summary(
-                user2_premium, user2_pref_gender, user2_coins_deducted, chat_cost, user2_points
+                user2_premium, user2_pref_gender, user2_coins_deducted, filtered_chat_cost, user2_points
             )
             
             user1_msg = (

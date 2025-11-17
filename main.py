@@ -343,6 +343,10 @@ async def lifespan(app: FastAPI):
         await run_migration(migration_file)
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_default_chat_filter.sql")
         await run_migration(migration_file)
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_is_virtual.sql")
+        await run_migration(migration_file)
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_create_virtual_profiles_table.sql")
+        await run_migration(migration_file)
         logger.info("✅ Migrations completed")
     except Exception as e:
         logger.error(f"❌ Failed to run migrations: {e}")

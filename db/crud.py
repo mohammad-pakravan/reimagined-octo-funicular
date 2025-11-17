@@ -70,7 +70,8 @@ async def search_users(
     """
     query = select(User).where(
         User.is_active == True,
-        User.is_banned == False
+        User.is_banned == False,
+        User.is_virtual == False  # Exclude virtual profiles from search results
     )
     
     if city:
@@ -99,11 +100,10 @@ async def search_users(
             # If activity_tracker is not available, return empty list
             return []
         
-        # For online search, fetch more users to sort properly
-        # We need to fetch enough users, filter online ones, sort, then apply offset/limit
-        max_fetch_for_sorting = limit + offset + 200  # Fetch extra for sorting
-        query_batch = query.limit(max_fetch_for_sorting)
-        result = await session.execute(query_batch)
+        # For online search, fetch ALL matching users for consistent pagination
+        # We need to fetch ALL users, filter online ones, sort, then apply offset/limit
+        # This ensures consistent results across multiple pagination requests
+        result = await session.execute(query)
         all_users = list(result.scalars().all())
         
         # Filter online users and prepare for sorting
@@ -128,16 +128,15 @@ async def search_users(
         sorted_online = [u[0] for u in online_candidates]
         return sorted_online[offset:offset + limit]
     else:
-        # Normal search - fetch more users than needed for proper sorting
-        # We need to fetch more to sort properly, then apply offset/limit
-        fetch_limit = limit + offset + 100  # Fetch extra to ensure we have enough after sorting
-        query_all = query.limit(fetch_limit)
-        result = await session.execute(query_all)
-        users = list(result.scalars().all())
+        # Normal search - fetch ALL matching users for consistent pagination
+        # We need to fetch ALL users, sort them once, then apply offset/limit
+        # This ensures consistent results across multiple pagination requests
+        result = await session.execute(query)
+        all_users = list(result.scalars().all())
 
         # Prepare for sorting
         processed = []
-        for u in users:
+        for u in all_users:
             last_seen = u.last_seen
             created_at = u.created_at
             processed.append((u, last_seen, created_at))
@@ -179,6 +178,7 @@ async def create_user(
     province: Optional[str] = None,
     city: Optional[str] = None,
     profile_image_url: Optional[str] = None,
+    is_virtual: bool = False,
 ) -> User:
     """Create a new user."""
     import hashlib
@@ -195,10 +195,402 @@ async def create_user(
         city=city,
         profile_image_url=profile_image_url,
         profile_id=profile_id,
+        is_virtual=is_virtual,
     )
     session.add(user)
     await session.commit()
     await session.refresh(user)
+    return user
+
+
+async def get_or_create_virtual_profile_from_pool(
+    session: AsyncSession,
+    user_age: Optional[int] = None,
+    user_city: Optional[str] = None,
+    user_province: Optional[str] = None,
+    activity_tracker=None,
+    exclude_profile_ids: Optional[list[int]] = None,
+) -> User:
+    """
+    Get a virtual profile from the pool, or create new ones if pool is empty.
+    Maintains a pool of virtual profiles to avoid creating new ones each time.
+    """
+    from sqlalchemy import select
+    from config.settings import settings
+    import random
+    
+    # Try to get an available virtual profile from pool
+    # Look for virtual profiles that are not currently in an active chat
+    query = select(User).where(
+        User.is_virtual == True,
+        User.is_active == True,
+        User.gender == "female",
+    )
+    
+    # Filter by age if provided
+    if user_age and 18 <= user_age <= 35:
+        min_age = max(18, user_age - 3)
+        max_age = min(35, user_age + 3)
+        query = query.where(User.age >= min_age, User.age <= max_age)
+    
+    # Filter by city/province if provided
+    if user_city:
+        query = query.where(User.city == user_city)
+    if user_province:
+        query = query.where(User.province == user_province)
+    
+    result = await session.execute(query)
+    all_profiles = list(result.scalars().all())
+    
+    # Filter out excluded profiles (recently used)
+    if exclude_profile_ids:
+        available_profiles = [p for p in all_profiles if p.id not in exclude_profile_ids]
+    else:
+        available_profiles = all_profiles
+    
+    # If no profiles available after filtering, use all profiles (fallback)
+    if not available_profiles:
+        available_profiles = all_profiles
+    
+    if available_profiles:
+        # Filter out profiles that are currently in active chats
+        # We'll do a simple check: if there are many profiles, prefer ones not recently used
+        # For now, just select randomly but try to avoid the same profile if possible
+        
+        # If we have multiple profiles, shuffle and try to get a different one
+        if len(available_profiles) > 1:
+            # Shuffle to ensure randomness
+            random.shuffle(available_profiles)
+            
+            # Prefer profiles with unique names (not duplicate names)
+            # This helps avoid obvious patterns
+            unique_name_profiles = []
+            name_counts = {}
+            for profile in available_profiles:
+                name = profile.display_name or ""
+                name_counts[name] = name_counts.get(name, 0) + 1
+            
+            # Prioritize profiles with unique names
+            for profile in available_profiles:
+                name = profile.display_name or ""
+                if name_counts.get(name, 0) == 1:
+                    unique_name_profiles.append(profile)
+            
+            # If we have unique name profiles, prefer them
+            if unique_name_profiles:
+                selected_profile = random.choice(unique_name_profiles[:min(5, len(unique_name_profiles))])
+            else:
+                # Otherwise, just pick randomly
+                selected_profile = random.choice(available_profiles[:min(5, len(available_profiles))])
+        else:
+            selected_profile = available_profiles[0]
+        
+        # Update last_seen to make it appear online
+        selected_profile.last_seen = datetime.utcnow()
+        await session.commit()
+        await session.refresh(selected_profile)
+        
+        # Set online status in Redis
+        if activity_tracker:
+            try:
+                await activity_tracker.update_activity(selected_profile.telegram_id, db_session=None)
+            except Exception:
+                pass
+        
+        return selected_profile
+    
+    # No available profile in pool, check pool size and create new ones if needed
+    pool_size_query = select(func.count(User.id)).where(
+        User.is_virtual == True,
+        User.is_active == True,
+        User.gender == "female",
+    )
+    pool_size_result = await session.execute(pool_size_query)
+    current_pool_size = pool_size_result.scalar() or 0
+    
+    # If pool is smaller than desired size, create new profiles
+    if current_pool_size < settings.VIRTUAL_PROFILE_POOL_SIZE:
+        # Create multiple profiles to fill the pool
+        profiles_to_create = settings.VIRTUAL_PROFILE_POOL_SIZE - current_pool_size
+        for _ in range(profiles_to_create):
+            await create_virtual_female_profile(
+                session,
+                user_age=user_age,
+                user_city=user_city,
+                user_province=user_province,
+                activity_tracker=activity_tracker,
+            )
+        
+        # Now get one from the pool
+        result = await session.execute(query)
+        available_profiles = list(result.scalars().all())
+        if available_profiles:
+            selected_profile = random.choice(available_profiles)
+            selected_profile.last_seen = datetime.utcnow()
+            await session.commit()
+            await session.refresh(selected_profile)
+            
+            if activity_tracker:
+                try:
+                    await activity_tracker.update_activity(selected_profile.telegram_id, db_session=None)
+                except Exception:
+                    pass
+            
+            return selected_profile
+    
+    # If still no profile available, create one on the fly
+    return await create_virtual_female_profile(
+        session,
+        user_age=user_age,
+        user_city=user_city,
+        user_province=user_province,
+        activity_tracker=activity_tracker,
+    )
+
+
+async def create_virtual_female_profile(
+    session: AsyncSession,
+    user_age: Optional[int] = None,
+    user_city: Optional[str] = None,
+    user_province: Optional[str] = None,
+    activity_tracker=None,
+) -> User:
+    """
+    Create a virtual female profile for engagement using data from real users.
+    Used when a boy is searching for a girl but no match is found after timeout.
+    Combines data from different real female users to create a realistic virtual profile.
+    """
+    import hashlib
+    import random
+    import time
+    from sqlalchemy import select, func
+    
+    # Generate unique telegram_id for virtual profile (negative number to avoid conflicts)
+    virtual_telegram_id = -int(time.time() * 1000) - random.randint(1000, 9999)
+    
+    # Generate unique profile_id
+    profile_id = hashlib.md5(f"virtual_{virtual_telegram_id}".encode()).hexdigest()[:12]
+    
+    # Get real female users from database (exclude virtual profiles)
+    query = select(User).where(
+        User.gender == "female",
+        User.is_active == True,
+        User.is_banned == False,
+        User.is_virtual == False,  # Only real users
+        User.display_name.isnot(None),  # Must have display name
+    )
+    
+    # Filter by age range if user_age provided
+    if user_age and 18 <= user_age <= 35:
+        min_age = max(18, user_age - 3)
+        max_age = min(35, user_age + 3)
+        query = query.where(User.age >= min_age, User.age <= max_age)
+    else:
+        # Default age range
+        query = query.where(User.age >= 18, User.age <= 35)
+    
+    # Filter by city/province if provided
+    if user_city:
+        query = query.where(User.city == user_city)
+    if user_province:
+        query = query.where(User.province == user_province)
+    
+    # Get at least 10-20 real users to mix data from
+    query = query.limit(50)
+    result = await session.execute(query)
+    real_users = list(result.scalars().all())
+    
+    if not real_users:
+        # Fallback: if no real users found, use default values
+        virtual_age = random.randint(18, 28) if not user_age else user_age
+        virtual_city = user_city or "تهران"
+        virtual_province = user_province or "تهران"
+        virtual_display_name = "کاربر"
+        virtual_profile_image = None
+        virtual_like_count = 0
+    else:
+        # Mix data from different real users
+        # Ensure each virtual profile has unique combination of attributes
+        
+        # 1. Display name from one user - check for uniqueness
+        max_name_attempts = 50
+        virtual_display_name = None
+        used_names = set()
+        
+        # Get virtual profile names created in last 3 hours to avoid duplicates
+        from datetime import timedelta
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        three_hours_ago = datetime.utcnow() - timedelta(hours=3)
+        existing_names_query = select(User.display_name).where(
+            User.is_virtual == True,
+            User.display_name.isnot(None),
+            User.created_at >= three_hours_ago  # Only check profiles from last 3 hours
+        )
+        existing_names_result = await session.execute(existing_names_query)
+        existing_names = {name for name in existing_names_result.scalars().all() if name}
+        logger.info(f"Creating virtual profile: {len(existing_names)} unique names used in last 3 hours")
+        
+        for attempt in range(max_name_attempts):
+            name_user = random.choice(real_users)
+            candidate_name = name_user.display_name or "کاربر"
+            
+            # Check if this name is already used by another virtual profile
+            if candidate_name not in existing_names and candidate_name not in used_names:
+                virtual_display_name = candidate_name
+                break
+            
+            used_names.add(candidate_name)
+        
+        # If all names are taken, add a unique suffix based on timestamp
+        if not virtual_display_name:
+            base_name = random.choice(real_users).display_name or "کاربر"
+            # Use timestamp + random to ensure uniqueness
+            import time
+            unique_suffix = int(time.time() * 1000) % 10000  # Last 4 digits of timestamp
+            virtual_display_name = f"{base_name}{unique_suffix}"
+            
+            # Double check this name is unique (in last 3 hours)
+            final_check = select(func.count(User.id)).where(
+                User.is_virtual == True,
+                User.display_name == virtual_display_name,
+                User.created_at >= three_hours_ago
+            )
+            final_result = await session.execute(final_check)
+            final_count = final_result.scalar() or 0
+            
+            # If still duplicate (in last 3 hours), add more randomness
+            if final_count > 0:
+                extra_random = random.randint(1000, 9999)
+                virtual_display_name = f"{base_name}{unique_suffix}{extra_random}"
+        
+        # 2. Age from another user (or calculate based on user_age)
+        if user_age and 18 <= user_age <= 35:
+            # Find users with similar age
+            age_candidates = [u for u in real_users if u.age and abs(u.age - user_age) <= 3]
+            if age_candidates:
+                age_user = random.choice(age_candidates)
+                virtual_age = age_user.age
+            else:
+                min_age = max(18, user_age - 3)
+                max_age = min(35, user_age + 3)
+                virtual_age = random.randint(min_age, max_age)
+        else:
+            age_user = random.choice(real_users)
+            virtual_age = age_user.age or random.randint(18, 28)
+        
+        # 3. City and province from another user (or use provided)
+        # Check for unique city/province combination in last 3 hours
+        if user_city and user_province:
+            virtual_city = user_city
+            virtual_province = user_province
+        else:
+            # Get existing city/province combinations from last 3 hours
+            existing_locations_query = select(User.city, User.province).where(
+                User.is_virtual == True,
+                User.created_at >= three_hours_ago,
+                User.city.isnot(None),
+                User.province.isnot(None)
+            )
+            existing_locations_result = await session.execute(existing_locations_query)
+            existing_locations = {(city, province) for city, province in existing_locations_result.all() if city and province}
+            logger.info(f"Creating virtual profile: {len(existing_locations)} unique city/province combinations used in last 3 hours")
+            
+            # Try to find unique location
+            max_location_attempts = 30
+            virtual_city = None
+            virtual_province = None
+            for _ in range(max_location_attempts):
+                location_user = random.choice(real_users)
+                candidate_city = location_user.city or user_city or "تهران"
+                candidate_province = location_user.province or user_province or "تهران"
+                
+                if (candidate_city, candidate_province) not in existing_locations:
+                    virtual_city = candidate_city
+                    virtual_province = candidate_province
+                    break
+            
+            # If no unique location found, use a random one
+            if not virtual_city or not virtual_province:
+                location_user = random.choice(real_users)
+                virtual_city = location_user.city or user_city or "تهران"
+                virtual_province = location_user.province or user_province or "تهران"
+        
+        # 4. Profile image from another user (prefer users with images)
+        # Try to get a unique image
+        image_users = [u for u in real_users if u.profile_image_url]
+        virtual_profile_image = None
+        if image_users:
+            # Get virtual profile images created in last 3 hours to avoid duplicates
+            existing_images_query = select(User.profile_image_url).where(
+                User.is_virtual == True,
+                User.profile_image_url.isnot(None),
+                User.created_at >= three_hours_ago  # Only check profiles from last 3 hours
+            )
+            existing_images_result = await session.execute(existing_images_query)
+            existing_images = {img for img in existing_images_result.scalars().all() if img}
+            logger.info(f"Creating virtual profile: {len(existing_images)} unique images used in last 3 hours")
+            
+            max_image_attempts = 30
+            used_images = set()
+            for attempt in range(max_image_attempts):
+                image_user = random.choice(image_users)
+                candidate_image = image_user.profile_image_url
+                
+                # Check if this image is already used by another virtual profile
+                if candidate_image not in existing_images and candidate_image not in used_images:
+                    virtual_profile_image = candidate_image
+                    break
+                
+                used_images.add(candidate_image)
+            
+            # If all images are taken in last 3 hours, use a random one anyway (but log it)
+            if not virtual_profile_image:
+                image_user = random.choice(image_users)
+                virtual_profile_image = image_user.profile_image_url
+                logger.warning(f"All images from real users are used in last 3 hours, using duplicate image for virtual profile")
+        
+        # 5. Like count from another user (randomize a bit)
+        like_user = random.choice(real_users)
+        base_like_count = like_user.like_count or 0
+        # Add some randomness to like count (±20%)
+        like_variation = int(base_like_count * 0.2) if base_like_count > 0 else 5
+        virtual_like_count = max(0, base_like_count + random.randint(-like_variation, like_variation))
+    
+    # Create virtual user with mixed data from real users
+    user = User(
+        telegram_id=virtual_telegram_id,
+        username=None,
+        display_name=virtual_display_name,
+        gender="female",
+        age=virtual_age,
+        province=virtual_province,
+        city=virtual_city,
+        profile_image_url=virtual_profile_image,
+        like_count=virtual_like_count,
+        profile_id=profile_id,
+        is_virtual=True,
+        is_active=True,
+        is_banned=False,
+        last_seen=datetime.utcnow(),  # Set as online
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    
+    # Log created virtual profile details
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"✅ Created virtual profile ID={user.id}: name='{virtual_display_name}', age={virtual_age}, city='{virtual_city}', province='{virtual_province}', has_image={virtual_profile_image is not None}")
+    
+    # Set online status in Redis (for virtual profile only, not real users)
+    if activity_tracker:
+        try:
+            await activity_tracker.update_activity(virtual_telegram_id, db_session=None)
+        except Exception as e:
+            logger.warning(f"Failed to set online status for virtual profile {virtual_telegram_id}: {e}")
+    
     return user
 
 

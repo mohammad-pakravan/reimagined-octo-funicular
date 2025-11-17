@@ -85,6 +85,9 @@ from config.settings import settings
 
 router = Router()
 
+# Track active broadcasts for pause/resume/cancel functionality
+_active_broadcasts: dict[int, dict] = {}  # broadcast_id -> {status, stop_event, pause_event}
+
 
 def get_gender_emoji(gender: str) -> str:
     """Get emoji for gender."""
@@ -107,6 +110,7 @@ def format_profile_id(profile_id: str) -> str:
 class BroadcastStates(StatesGroup):
     """FSM states for broadcast."""
     waiting_message = State()
+    waiting_rate = State()
 
 
 class CreateReferralLinkStates(StatesGroup):
@@ -189,13 +193,11 @@ async def cmd_admin_broadcast(message: Message, state: FSMContext):
 
 
 @router.message(BroadcastStates.waiting_message)
-async def process_broadcast(message: Message, state: FSMContext):
+async def process_broadcast_message(message: Message, state: FSMContext):
     """Process broadcast message - supports all message types."""
     if not is_admin(message.from_user.id):
         await message.answer("❌ دسترسی محدود است.")
         return
-    
-    admin_id = message.from_user.id
     
     # Determine message type and extract content
     message_type = "text"
@@ -260,8 +262,89 @@ async def process_broadcast(message: Message, state: FSMContext):
         await message.answer("❌ نوع پیام پشتیبانی نمی‌شود.")
         return
     
-    # Create broadcast message in database
+    # Store message data in FSM
+    await state.update_data(
+        admin_id=message.from_user.id,
+        message_type=message_type,
+        message_text=message_text,
+        message_file_id=message_file_id,
+        message_caption=message_caption,
+        forwarded_from_chat_id=forwarded_from_chat_id,
+        forwarded_from_message_id=forwarded_from_message_id
+    )
+    
+    # Ask for rate limit
+    await message.answer(
+        "📨 پیام دریافت شد!\n\n"
+        "⚙️ لطفاً سرعت ارسال را مشخص کنید:\n\n"
+        "🔢 تعداد پیام در هر دقیقه را وارد کنید:\n"
+        "• برای ارسال سریع: 20-30\n"
+        "• برای ارسال متوسط: 10-20\n"
+        "• برای ارسال آهسته: 1-10\n\n"
+        "⚠️ محدودیت تلگرام: حداکثر 30 پیام در ثانیه\n"
+        "💡 توصیه: 10-20 پیام در دقیقه (امن)"
+    )
+    
+    # Move to next state
+    await state.set_state(BroadcastStates.waiting_rate)
+
+
+@router.message(BroadcastStates.waiting_rate)
+async def process_broadcast_rate(message: Message, state: FSMContext):
+    """Process broadcast rate and send messages."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ دسترسی محدود است.")
+        return
+    
+    # Validate rate
+    try:
+        rate_per_minute = int(message.text)
+        if rate_per_minute < 1 or rate_per_minute > 1800:  # Max 1800 = 30 per second
+            await message.answer("❌ عدد باید بین 1 تا 1800 باشد.")
+            return
+    except ValueError:
+        await message.answer("❌ لطفاً یک عدد صحیح وارد کنید.")
+        return
+    
+    # Get stored message data
+    data = await state.get_data()
+    admin_id = data['admin_id']
+    message_type = data['message_type']
+    message_text = data['message_text']
+    message_file_id = data['message_file_id']
+    message_caption = data['message_caption']
+    forwarded_from_chat_id = data['forwarded_from_chat_id']
+    forwarded_from_message_id = data['forwarded_from_message_id']
+    
+    # Calculate delay between messages (in seconds)
+    delay_seconds = 60.0 / rate_per_minute
+    
+    # Create broadcast message in database first
     async for db_session in get_db():
+        # Get all users first
+        users = await get_all_users(db_session)
+        
+        # Create progress message with control buttons
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        progress_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⏸ توقف موقت", callback_data=f"broadcast:pause:{0}"),
+                InlineKeyboardButton(text="🛑 لغو", callback_data=f"broadcast:cancel:{0}")
+            ]
+        ])
+        
+        progress_msg = await message.answer(
+            f"✅ شروع ارسال پیام همگانی...\n\n"
+            f"⚙️ سرعت: {rate_per_minute} پیام در دقیقه\n"
+            f"⏱ تأخیر بین پیام‌ها: {delay_seconds:.2f} ثانیه\n\n"
+            f"📊 پیشرفت: 0/{len(users)} (0%)\n"
+            f"✅ موفق: 0\n"
+            f"❌ ناموفق: 0\n\n"
+            f"⏳ در حال ارسال...",
+            reply_markup=progress_keyboard
+        )
+        
+        # Create broadcast message in database
         broadcast = await create_broadcast_message(
             db_session,
             admin_id=admin_id,
@@ -273,17 +356,66 @@ async def process_broadcast(message: Message, state: FSMContext):
             forwarded_from_message_id=forwarded_from_message_id
         )
         
-        # Get all users
-        users = await get_all_users(db_session)
+        # Update progress message with broadcast ID
+        progress_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⏸ توقف موقت", callback_data=f"broadcast:pause:{broadcast.id}"),
+                InlineKeyboardButton(text="🛑 لغو", callback_data=f"broadcast:cancel:{broadcast.id}")
+            ]
+        ])
+        await progress_msg.edit_reply_markup(reply_markup=progress_keyboard)
         
+        # Users already loaded above (line 325)
         sent_count = 0
         failed_count = 0
         
         from aiogram import Bot
+        import asyncio
         bot = Bot(token=settings.BOT_TOKEN)
         
-        # Send broadcast to all users
-        for user in users:
+        # Initialize broadcast control
+        _active_broadcasts[broadcast.id] = {
+            'status': 'running',  # running, paused, cancelled
+            'pause_event': asyncio.Event(),
+            'stop_event': asyncio.Event(),
+        }
+        _active_broadcasts[broadcast.id]['pause_event'].set()  # Start as not paused
+        
+        last_update_time = asyncio.get_event_loop().time()
+        update_interval = 3  # Update progress every 3 seconds
+        
+        # Send broadcast to all users with rate limiting
+        for index, user in enumerate(users, start=1):
+            # Check if broadcast was cancelled
+            if _active_broadcasts[broadcast.id]['status'] == 'cancelled':
+                break
+            
+            # Check if broadcast is paused
+            if _active_broadcasts[broadcast.id]['status'] == 'paused':
+                await _active_broadcasts[broadcast.id]['pause_event'].wait()
+            
+            # Update progress message periodically
+            current_time = asyncio.get_event_loop().time()
+            if current_time - last_update_time >= update_interval or index == 1:
+                last_update_time = current_time
+                percent = (index / len(users)) * 100
+                status_emoji = "⏸" if _active_broadcasts[broadcast.id]['status'] == 'paused' else "⏳"
+                
+                try:
+                    await progress_msg.edit_text(
+                        f"{status_emoji} پیام همگانی در حال ارسال...\n\n"
+                        f"⚙️ سرعت: {rate_per_minute} پیام/دقیقه\n"
+                        f"⏱ تأخیر: {delay_seconds:.2f} ثانیه/پیام\n\n"
+                        f"📊 پیشرفت: {index-1}/{len(users)} ({percent:.1f}%)\n"
+                        f"✅ موفق: {sent_count}\n"
+                        f"❌ ناموفق: {failed_count}\n\n"
+                        f"⏳ در حال ارسال...",
+                        reply_markup=progress_keyboard
+                    )
+                except Exception:
+                    pass  # Ignore edit errors
+            
+
             try:
                 # Send based on message type
                 if message_type == "forward":
@@ -359,6 +491,10 @@ async def process_broadcast(message: Message, state: FSMContext):
                 await increment_broadcast_stats(db_session, broadcast.id, sent=True)
                 sent_count += 1
                 
+                # Rate limiting: wait between messages
+                if index < len(users):  # Don't wait after last message
+                    await asyncio.sleep(delay_seconds)
+                
             except Exception as e:
                 # Create failed receipt
                 await create_broadcast_receipt(
@@ -372,22 +508,126 @@ async def process_broadcast(message: Message, state: FSMContext):
         
         await bot.session.close()
         
+        # Cleanup broadcast tracking
+        broadcast_status = _active_broadcasts[broadcast.id]['status']
+        del _active_broadcasts[broadcast.id]
+        
         # Get final statistics
         stats = await get_broadcast_statistics(db_session, broadcast.id)
         
-        await message.answer(
-            f"✅ پیام همگانی ارسال شد!\n\n"
-            f"📊 آمار:\n"
-            f"• ارسال موفق: {sent_count}\n"
-            f"• ارسال ناموفق: {failed_count}\n"
-            f"• کل کاربران: {len(users)}\n\n"
-            f"🔗 برای مشاهده آمار کامل:\n"
-            f"/admin_broadcast_stats {broadcast.id}",
-            parse_mode=None
-        )
+        # Update final progress message
+        if broadcast_status == 'cancelled':
+            final_emoji = "🛑"
+            final_text = "لغو شد"
+        else:
+            final_emoji = "✅"
+            final_text = "تکمیل شد"
+        
+        try:
+            await progress_msg.edit_text(
+                f"{final_emoji} پیام همگانی {final_text}!\n\n"
+                f"⚙️ سرعت: {rate_per_minute} پیام/دقیقه\n"
+                f"⏱ تأخیر: {delay_seconds:.2f} ثانیه/پیام\n\n"
+                f"📊 آمار نهایی:\n"
+                f"• ارسال موفق: {sent_count}\n"
+                f"• ارسال ناموفق: {failed_count}\n"
+                f"• کل کاربران: {len(users)}\n"
+                f"• درصد موفقیت: {(sent_count/len(users)*100):.1f}%\n\n"
+                f"🔗 برای مشاهده آمار کامل:\n"
+                f"/admin_broadcast_stats {broadcast.id}",
+                reply_markup=None
+            )
+        except Exception:
+            pass
         
         await state.clear()
         break
+
+
+@router.callback_query(F.data.startswith("broadcast:pause:"))
+async def handle_broadcast_pause(callback: CallbackQuery):
+    """Pause broadcast."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+    
+    broadcast_id = int(callback.data.split(":")[-1])
+    
+    if broadcast_id not in _active_broadcasts:
+        await callback.answer("❌ این broadcast دیگر فعال نیست.", show_alert=True)
+        return
+    
+    # Pause the broadcast
+    _active_broadcasts[broadcast_id]['status'] = 'paused'
+    _active_broadcasts[broadcast_id]['pause_event'].clear()
+    
+    # Update keyboard
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    pause_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="▶️ ادامه", callback_data=f"broadcast:resume:{broadcast_id}"),
+            InlineKeyboardButton(text="🛑 لغو", callback_data=f"broadcast:cancel:{broadcast_id}")
+        ]
+    ])
+    
+    try:
+        await callback.message.edit_reply_markup(reply_markup=pause_keyboard)
+        await callback.answer("⏸ ارسال متوقف شد. برای ادامه روی دکمه 'ادامه' کلیک کنید.")
+    except Exception:
+        await callback.answer("❌ خطا در به‌روزرسانی.")
+
+
+@router.callback_query(F.data.startswith("broadcast:resume:"))
+async def handle_broadcast_resume(callback: CallbackQuery):
+    """Resume broadcast."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+    
+    broadcast_id = int(callback.data.split(":")[-1])
+    
+    if broadcast_id not in _active_broadcasts:
+        await callback.answer("❌ این broadcast دیگر فعال نیست.", show_alert=True)
+        return
+    
+    # Resume the broadcast
+    _active_broadcasts[broadcast_id]['status'] = 'running'
+    _active_broadcasts[broadcast_id]['pause_event'].set()
+    
+    # Update keyboard
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    resume_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⏸ توقف موقت", callback_data=f"broadcast:pause:{broadcast_id}"),
+            InlineKeyboardButton(text="🛑 لغو", callback_data=f"broadcast:cancel:{broadcast_id}")
+        ]
+    ])
+    
+    try:
+        await callback.message.edit_reply_markup(reply_markup=resume_keyboard)
+        await callback.answer("▶️ ارسال ادامه یافت.")
+    except Exception:
+        await callback.answer("❌ خطا در به‌روزرسانی.")
+
+
+@router.callback_query(F.data.startswith("broadcast:cancel:"))
+async def handle_broadcast_cancel(callback: CallbackQuery):
+    """Cancel broadcast."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+    
+    broadcast_id = int(callback.data.split(":")[-1])
+    
+    if broadcast_id not in _active_broadcasts:
+        await callback.answer("❌ این broadcast دیگر فعال نیست.", show_alert=True)
+        return
+    
+    # Cancel the broadcast
+    _active_broadcasts[broadcast_id]['status'] = 'cancelled'
+    _active_broadcasts[broadcast_id]['pause_event'].set()  # Unpause if paused
+    
+    await callback.answer("🛑 ارسال لغو شد.", show_alert=True)
 
 
 @router.message(Command("admin_broadcast_stats"))

@@ -1,0 +1,102 @@
+# ==================================================
+# Test Environment Configuration
+# کپی کنید و نام فایل را به .env.test تغییر دهید
+# ==================================================
+
+# Telegram Bot Configuration (Test Bot)
+BOT_TOKEN_TEST=your_test_bot_token_here
+
+# MySQL Database Configuration (Test Environment)
+MYSQL_ROOT_PASSWORD_TEST=test_root_password_123
+MYSQL_DATABASE_TEST=telecaht_test
+MYSQL_USER_TEST=test_user
+MYSQL_PASSWORD_TEST=test_password_123
+
+# Database Connection Pool Configuration (Test)
+DB_POOL_SIZE_TEST=50
+DB_MAX_OVERFLOW_TEST=20
+
+# Redis Configuration (Test Environment)
+REDIS_DB_TEST=1
+REDIS_PASSWORD_TEST=
+REDIS_MAX_CONNECTIONS_TEST=30
+
+# MinIO Configuration (Test Environment)
+# توجه: حتماً یک bucket جدید برای تست استفاده کنید
+MINIO_ENDPOINT_TEST=your-minio-server.com:9000
+MINIO_PUBLIC_URL_TEST=https://your-minio-server.com:9000
+MINIO_ACCESS_KEY_TEST=your-access-key
+MINIO_SECRET_KEY_TEST=your-secret-key
+MINIO_BUCKET_NAME_TEST=test-profile-images
+MINIO_USE_SSL_TEST=true
+
+# Channel Configuration (Test Environment)
+# یک کانال تست جدید بسازید
+MANDATORY_CHANNEL_ID_TEST=@your_test_channel_username
+
+# Admin Configuration (Test Environment)
+ADMIN_IDS_TEST=123456789,987654321
+
+# FastAPI Configuration (Test Environment)
+VIDEO_CALL_DOMAIN_TEST=https://your-test-domain.com
+VIDEO_CALL_API_URL_TEST=http://localhost:8001
+VIDEO_CALL_WS_URL_TEST=ws://localhost:8001
+API_SECRET_KEY_TEST=test-secret-key-change-this-in-production
+
+# Premium Configuration (Test Environment)
+# قیمت تست کمتر برای راحتی تست
+PREMIUM_PRICE_TEST=5000.0
+PREMIUM_DURATION_DAYS_TEST=30
+
+# Chat Configuration (Test Environment)
+MAX_CHAT_DURATION_MINUTES_TEST=60
+PREMIUM_CHAT_DURATION_MINUTES_TEST=180
+MATCHMAKING_TIMEOUT_SECONDS_TEST=300
+
+# Cost Configuration (Test)
+CHAT_REQUEST_COST_TEST=1
+DIRECT_MESSAGE_COST_TEST=1
+
+# Matchmaking Worker Configuration (Test)
+MATCHMAKING_WORKER_INTERVAL_TEST=1
+MATCHMAKING_WORKER_BATCH_SIZE_TEST=5
+
+# Matchmaking Backend (Test)
+MATCHMAKING_BACKEND_TEST=redis
+
+# Matchmaking Probability Configuration (Test)
+RANDOM_GIRL_BOY_MATCH_PROBABILITY_TEST=0.5
+PROBABILITY_CHECK_COOLDOWN_SECONDS_TEST=30
+VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS_TEST=40
+VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS_TEST=50
+VIRTUAL_PROFILE_POOL_SIZE_TEST=10
+
+# No-Rematch Rule Configuration (Test)
+ENABLE_NO_REMATCH_RULE_TEST=true
+NO_REMATCH_HOURS_TEST=7
+
+# Rate Limiting (Test)
+RATE_LIMIT_MESSAGES_PER_MINUTE_TEST=20
+
+# ==================================================
+# نحوه استفاده:
+# ==================================================
+# 1. این فایل را کپی کنید و نام آن را به .env.test تغییر دهید
+# 2. مقادیر را با اطلاعات واقعی تست خود پر کنید
+# 3. دستور زیر را اجرا کنید:
+#
+#    docker-compose -f docker-compose.test.yml --env-file .env.test up -d
+#
+# ==================================================
+# نکات مهم:
+# ==================================================
+# - حتماً یک BOT TOKEN جدید از @BotFather برای تست بگیرید
+# - یک کانال تست جداگانه بسازید
+# - در MinIO یک bucket جدید با نام test-profile-images بسازید
+# - پورت‌های این محیط با محیط اصلی تداخل ندارد:
+#   * Bot API: 8001 (به جای 8000)
+#   * phpMyAdmin: 8081 (به جای 8080)
+#   * MySQL: 13306 (به جای 3306)
+#   * Redis: 6898 (به جای 6899)
+# ==================================================
+

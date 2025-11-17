@@ -140,7 +140,7 @@ async def handle_user_search(inline_query: InlineQuery):
             
             results.append(
                 InlineQueryResultArticle(
-                    id=f"{found_user.id}_{offset}",
+                    id=str(found_user.id),  # Use only user ID, not offset, to avoid duplicates
                     title=f"🚀 {display_name_text[:30]}",
                     description=description[:50],
                     thumbnail_url=thumbnail_url,

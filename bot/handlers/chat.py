@@ -318,23 +318,21 @@ async def add_user_to_queue_direct(
     from db.crud import check_user_premium, get_system_setting_value, get_user_points
     user_premium = await check_user_premium(db_session, user.id)
     
-    # Get chat cost
-    chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
-    try:
-        chat_cost = int(chat_cost_str)
-    except (ValueError, TypeError):
-        chat_cost = 3
+    # Get filtered chat cost (non-refundable)
+    from config.settings import settings
+    filtered_chat_cost = settings.FILTERED_CHAT_COST
     
     user_points = await get_user_points(db_session, user.id)
     
-    # Check if user has enough coins
-    if not user_premium and preferred_gender is not None and user_points < chat_cost:
+    # Check if user has enough coins for filtered chat
+    if not user_premium and preferred_gender is not None and user_points < filtered_chat_cost:
         from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
         try:
             await callback.message.edit_text(
                 f"⚠️ سکه کافی نداری!\n\n"
-                f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
                 f"💎 سکه فعلی تو: {user_points}\n\n"
+                f"⚠️ توجه: این سکه برگشت داده نمی‌شود.\n\n"
                 f"💡 می‌تونی:\n"
                 f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
                 f"• یا پریمیوم بگیری (چت رایگان)\n"
@@ -344,8 +342,9 @@ async def add_user_to_queue_direct(
         except:
             await callback.message.answer(
                 f"⚠️ سکه کافی نداری!\n\n"
-                f"💰 برای شروع چت به {chat_cost} سکه نیاز داری.\n"
+                f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
                 f"💎 سکه فعلی تو: {user_points}\n\n"
+                f"⚠️ توجه: این سکه برگشت داده نمی‌شود.\n\n"
                 f"💡 می‌تونی:\n"
                 f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
                 f"• یا پریمیوم بگیری (چت رایگان)\n"
@@ -391,10 +390,10 @@ async def add_user_to_queue_direct(
             return "💰 هزینه: رایگان (پریمیوم)"
         elif preferred_gender is None:
             return "💰 هزینه: رایگان (شانسی)"
-        elif user_points < chat_cost:
-            return f"⚠️ سکه کافی نداری ({chat_cost} سکه نیاز داری)"
+        elif user_points < filtered_chat_cost:
+            return f"⚠️ سکه کافی نداری ({filtered_chat_cost} سکه نیاز داری)"
         else:
-            return f"💰 هزینه: {chat_cost} سکه"
+            return f"💰 هزینه: {filtered_chat_cost} سکه (برگشت داده نمی‌شود)"
     
     cost_summary = get_search_cost_summary()
     
@@ -480,7 +479,69 @@ async def add_user_to_queue_direct(
             logger.debug(f"Cancelled existing timeout task for user {user_id}")
     
     # Create new timeout task
-    timeout_task = asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
+    # Determine which type of virtual profile (if any) to create
+    # 1. Boy + Explicit Female: Virtual FEMALE profile
+    # 2. Boy + Random Search: Virtual MALE profile (if no real boys available)
+    # 3. Boy + Explicit Male: Virtual MALE profile (priority 3)
+    
+    is_boy_searching_girl = (
+        user.gender == "male" and 
+        preferred_gender == "female"  # Explicit female preference
+    )
+    
+    is_boy_searching_boy = (
+        user.gender == "male" and 
+        preferred_gender == "male"  # Explicit male preference
+    )
+    
+    is_boy_random_search = (
+        user.gender == "male" and
+        preferred_gender is None  # Random search
+    )
+    
+    if is_boy_searching_girl:
+        # Boy searching for girl explicitly -> create virtual FEMALE after timeout
+        import random
+        timeout_seconds = random.randint(
+            settings.VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS,
+            settings.VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS
+        )
+        timeout_task = asyncio.create_task(check_matchmaking_timeout_with_virtual(
+            user_id, user.telegram_id, user.id, user.age, user.city, user.province, 
+            preferred_gender, timeout_seconds, virtual_gender="female",
+            filter_same_age=filter_same_age, filter_same_city=filter_same_city, 
+            filter_same_province=filter_same_province
+        ))
+    elif is_boy_searching_boy:
+        # Boy searching for boy explicitly -> create virtual MALE after timeout (priority 3)
+        import random
+        timeout_seconds = random.randint(
+            settings.VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS,
+            settings.VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS
+        )
+        timeout_task = asyncio.create_task(check_matchmaking_timeout_with_virtual(
+            user_id, user.telegram_id, user.id, user.age, user.city, user.province,
+            preferred_gender, timeout_seconds, virtual_gender="male",
+            filter_same_age=filter_same_age, filter_same_city=filter_same_city, 
+            filter_same_province=filter_same_province
+        ))
+    elif is_boy_random_search:
+        # Boy random search (no preferred gender) -> create virtual MALE if no real boys
+        import random
+        timeout_seconds = random.randint(
+            settings.VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS,
+            settings.VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS
+        )
+        timeout_task = asyncio.create_task(check_matchmaking_timeout_with_virtual(
+            user_id, user.telegram_id, user.id, user.age, user.city, user.province,
+            preferred_gender, timeout_seconds, virtual_gender="male",
+            filter_same_age=filter_same_age, filter_same_city=filter_same_city, 
+            filter_same_province=filter_same_province
+        ))
+    else:
+        # Normal 120 seconds timeout (for girls or other cases)
+        timeout_task = asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
+    
     _active_timeout_tasks[user_id] = timeout_task
     
     # Clean up task from dict when done
@@ -488,6 +549,345 @@ async def add_user_to_queue_direct(
         if user_id in _active_timeout_tasks:
             del _active_timeout_tasks[user_id]
     timeout_task.add_done_callback(cleanup_task)
+
+
+async def check_matchmaking_timeout_with_virtual(
+    user_id: int, 
+    telegram_id: int, 
+    db_user_id: int,
+    user_age: Optional[int],
+    user_city: Optional[str],
+    user_province: Optional[str],
+    preferred_gender: Optional[str],
+    timeout_seconds: int = 45,
+    virtual_gender: str = "female",  # "female" or "male"
+    filter_same_age: bool = False,
+    filter_same_city: bool = False,
+    filter_same_province: bool = False
+):
+    """
+    Check if user is still in queue after timeout and create virtual profile if needed.
+    Used for boys searching for girls - creates virtual female profile after 40-50 seconds.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    import time as time_module
+    from core.matchmaking_worker import matchmaking_queue
+    
+    start_time = time_module.time()
+    logger.info(f"Virtual profile timeout task started for user {user_id}, will check after {timeout_seconds} seconds")
+    
+    try:
+        # Wait for timeout (40-50 seconds)
+        await asyncio.sleep(timeout_seconds)
+        
+        elapsed_time = time_module.time() - start_time
+        logger.info(f"Virtual profile timeout check triggered for user {user_id} after {elapsed_time:.1f} seconds")
+    except asyncio.CancelledError:
+        logger.info(f"Virtual profile timeout task cancelled for user {user_id}")
+        raise
+    
+    # Check if user is still in queue
+    if matchmaking_queue and await matchmaking_queue.is_user_in_queue(user_id):
+        logger.info(f"User {user_id} is still in queue after {timeout_seconds} seconds, checking for active chat")
+        # Before creating virtual profile, check if user has active chat
+        async for db_session in get_db():
+            user = await get_user_by_telegram_id(db_session, telegram_id)
+            if not user:
+                logger.warning(f"User {user_id} not found in DB during virtual profile timeout check")
+                break
+            
+            # Check if user has active chat
+            if chat_manager and await chat_manager.is_chat_active(user.id, db_session):
+                # User has active chat, they were matched successfully
+                logger.info(f"User {user_id} has active chat, removing from queue silently (matched successfully)")
+                await matchmaking_queue.remove_user_from_queue(user_id)
+                break
+            
+            # User is still in queue and has no active chat - create virtual profile
+            logger.info(f"User {user_id} still in queue with no active chat after {timeout_seconds} seconds, checking for real users before creating virtual profile")
+            
+            # IMPORTANT: Before creating virtual profile, check one more time if there's a real user available
+            # This ensures we ALWAYS prioritize real users over virtual profiles
+            if matchmaking_queue:
+                # Try to find a match one more time (will respect filters)
+                match_id = await matchmaking_queue.find_match(user_id)
+                if match_id:
+                    logger.info(f"User {user_id} found real match {match_id} just before creating virtual profile, aborting virtual profile creation")
+                    return  # Match found, no need for virtual profile
+            
+            # No real match found, proceed with virtual profile
+            logger.info(f"No real girls available for user {user_id}, creating virtual profile")
+            
+            # Remove from queue first
+            await matchmaking_queue.remove_user_from_queue(user_id)
+            
+            # Get or create virtual female profile from new virtual_profiles table
+            from db.virtual_profile_crud import get_or_create_virtual_profile
+            try:
+                # Get activity_tracker for setting online status
+                from main import activity_tracker, redis_client
+                import json
+                
+                # Get recently used virtual profiles for this user from Redis
+                exclude_profile_ids = []
+                if redis_client:
+                    try:
+                        redis_key = f"user:virtual_profiles:{user_id}"
+                        recently_used_str = await redis_client.get(redis_key)
+                        
+                        if recently_used_str:
+                            try:
+                                if isinstance(recently_used_str, bytes):
+                                    recently_used_str = recently_used_str.decode('utf-8')
+                                exclude_profile_ids = json.loads(recently_used_str)
+                                # Keep only last 10 profiles to avoid excluding too many
+                                exclude_profile_ids = exclude_profile_ids[-10:]
+                                logger.info(f"User {user_id} has {len(exclude_profile_ids)} recently used virtual profiles to exclude: {exclude_profile_ids}")
+                            except (json.JSONDecodeError, ValueError):
+                                exclude_profile_ids = []
+                        else:
+                            logger.info(f"User {user_id} has no recently used virtual profiles")
+                    except Exception as e:
+                        logger.warning(f"Failed to get recently used profiles from Redis: {e}")
+                        exclude_profile_ids = []
+                
+                # Try to get a virtual profile that is not in an active chat
+                # Use multiple attempts to find a different profile each time
+                virtual_profile = None
+                max_attempts = 15  # More attempts to find a different profile
+                used_profile_ids = set(exclude_profile_ids)  # Track used profiles
+                
+                # Get a virtual profile (this handles everything - selection, creation, uniqueness)
+                # Pass user's filters (age, city, province) to match appropriate virtual profiles
+                # Also pass the gender of virtual profile to create
+                
+                # Get or create virtual profile with specified gender
+                virtual_profile = await get_or_create_virtual_profile(
+                    db_session,
+                    user_age=user_age if filter_same_age else None,  # Only filter by age if user enabled it
+                    user_city=user_city if filter_same_city else None,  # Only filter by city if user selected it
+                    user_province=user_province if filter_same_province else None,  # Only filter by province if user selected it
+                    exclude_profile_ids=list(used_profile_ids),
+                    activity_tracker=activity_tracker,
+                    gender=virtual_gender  # Pass the desired gender
+                )
+                
+                # Eager load the user relationship to avoid lazy loading issues
+                from sqlalchemy.orm import selectinload
+                from sqlalchemy import select as sql_select
+                from db.models import VirtualProfile as VP
+                virtual_profile_query = sql_select(VP).options(
+                    selectinload(VP.user)
+                ).where(VP.id == virtual_profile.id)
+                result = await db_session.execute(virtual_profile_query)
+                virtual_profile = result.scalars().first()
+                
+                # Store this profile ID in Redis for future exclusions (keep last 10)
+                if virtual_profile and redis_client:
+                    try:
+                        exclude_profile_ids.append(virtual_profile.id)
+                        exclude_profile_ids = exclude_profile_ids[-10:]  # Keep only last 10
+                        redis_key = f"user:virtual_profiles:{user_id}"
+                        await redis_client.setex(
+                            redis_key,
+                            86400,  # 24 hours TTL
+                            json.dumps(exclude_profile_ids)
+                        )
+                        logger.info(f"Stored virtual profile {virtual_profile.id} in Redis exclusion list for user {user_id}, total excluded: {len(exclude_profile_ids)}")
+                    except Exception as e:
+                        logger.warning(f"Failed to store recently used profile in Redis: {e}")
+                
+                logger.info(f"Selected virtual profile {virtual_profile.id} (user_id: {virtual_profile.user_id}, name: {virtual_profile.display_name}) for user {user_id}")
+                
+                # Create chat between user and virtual profile's user
+                if chat_manager:
+                    # Set preferred_gender to None for virtual profile to make it free (like "all" option)
+                    chat_room = await chat_manager.create_chat(
+                        user1_id=user.id,
+                        user2_id=virtual_profile.user_id,  # Use virtual_profile.user_id instead of virtual_profile.id
+                        db_session=db_session,
+                        user1_preferred_gender=preferred_gender if preferred_gender else None,  # Use actual preferred_gender or None
+                        user2_preferred_gender=None,  # Virtual profile always uses "all" (free)
+                    )
+                    logger.info(f"Created chat room {chat_room.id} between user {user.id} and virtual profile {virtual_profile.id} (user_id={virtual_profile.user_id})")
+                    
+                    # Get user premium status and cost info (like real matchmaking)
+                    from db.crud import check_user_premium, get_user_points, get_system_setting_value
+                    user_premium = await check_user_premium(db_session, user.id)
+                    
+                    # Get chat cost
+                    chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
+                    try:
+                        chat_cost = int(chat_cost_str)
+                    except (ValueError, TypeError):
+                        chat_cost = 3
+                    
+                    user_points = await get_user_points(db_session, user.id)
+                    
+                    # Don't deduct coins for virtual profile chats (they are considered unsuccessful)
+                    # Virtual profiles are just for engagement, user shouldn't pay for them
+                    user_coins_deducted = False
+                    
+                    # Helper function to generate cost summary (same as matchmaking_worker)
+                    # For virtual profiles, always show as free (no coins deducted)
+                    def get_match_cost_summary(is_premium, pref_gender, coins_deducted, chat_cost, points):
+                        # For virtual profiles, show cost based on user's premium status and preference
+                        # Note: For virtual profiles, coins are NOT deducted, but we show the cost as if it was
+                        if is_premium:
+                            return "💰 هزینه: رایگان (پریمیوم)"
+                        elif pref_gender is None:
+                            return "💰 هزینه: رایگان (همه)"
+                        else:
+                            # User selected specific gender, show cost (even though not deducted for virtual)
+                            return f"💰 {chat_cost} سکه کسر شد (باقی‌مانده: {points})"
+                    
+                    # Send notification to user that they are connected (exactly like real match)
+                    bot = Bot(token=settings.BOT_TOKEN)
+                    try:
+                        user_cost_summary = get_match_cost_summary(
+                            user_premium, preferred_gender, user_coins_deducted, chat_cost, user_points
+                        )
+                        
+                        connection_msg = (
+                            "✅ هم‌چت پیدا شد!\n\n"
+                            f"{user_cost_summary}\n\n"
+                            "💬 می‌تونید شروع به چت کنید."
+                        )
+                        
+                        await bot.send_message(
+                            telegram_id,
+                            connection_msg,
+                            reply_markup=get_chat_reply_keyboard()
+                        )
+                        await bot.session.close()
+                    except Exception as e:
+                        logger.error(f"Failed to send connection message to user {user_id}: {e}")
+                    
+                    # Wait random time (2-5 seconds) before sending "پروفایلت مشاهده شد"
+                    import random
+                    wait_time = random.uniform(2.0, 5.0)
+                    await asyncio.sleep(wait_time)
+                    
+                    # Send "پروفایلت مشاهده شد" message (as if from virtual profile)
+                    try:
+                        bot = Bot(token=settings.BOT_TOKEN)
+                        await bot.send_message(
+                            telegram_id,
+                            "👀 پروفایلت مشاهده شد"
+                        )
+                        await bot.session.close()
+                    except Exception as e:
+                        logger.error(f"Failed to send profile viewed message: {e}")
+                    
+                    # Wait random time (3-8 seconds) before automatically ending the chat
+                    wait_time = random.uniform(3.0, 8.0)
+                    await asyncio.sleep(wait_time)
+                    
+                    # End the chat
+                    try:
+                        await chat_manager.end_chat(chat_room.id, db_session)
+                        logger.info(f"Ended chat {chat_room.id} with virtual profile")
+                        
+                        # Get cost summary for end chat (same as real end_chat_confirm)
+                        from db.crud import check_user_premium, get_user_points
+                        user_premium = await check_user_premium(db_session, user.id)
+                        user_current_points = await get_user_points(db_session, user.id)
+                        
+                        # Helper function to generate cost summary (same as end_chat_confirm)
+                        # For virtual profiles, always show as free (no coins were deducted)
+                        def get_cost_summary(is_premium, was_cost_deducted, pref_gender, coins_refunded, chat_cost, current_points):
+                            # For virtual profiles, show refund if user selected specific gender
+                            if is_premium:
+                                return "💰 این چت رایگان بود (پریمیوم)"
+                            elif pref_gender is None:
+                                return "💰 این چت رایگان بود (همه)"
+                            elif was_cost_deducted:
+                                # User selected specific gender, show refund
+                                if coins_refunded:
+                                    return f"💰 {chat_cost} سکه برگشت داده شد"
+                                else:
+                                    return f"💰 {chat_cost} سکه کسر شد"
+                            else:
+                                # No coins deducted (shouldn't happen for virtual with specific gender)
+                                return "💰 این چت رایگان بود"
+                        
+                        # For virtual profile, check if coins should have been deducted (based on preferred_gender)
+                        # Even though we don't deduct for virtual, we show the cost/refund message
+                        should_have_deducted = (preferred_gender is not None and not user_premium)
+                        user_cost_summary = get_cost_summary(
+                            user_premium,
+                            should_have_deducted,  # Show as if coins were deducted if user selected specific gender
+                            preferred_gender,
+                            should_have_deducted,  # Show refund if coins should have been deducted
+                            chat_cost,
+                            user_current_points
+                        )
+                        
+                        # Get virtual profile profile_id
+                        virtual_profile_id_text = f"/user_{virtual_profile.profile_id}" if virtual_profile.profile_id else "کاربر"
+                        
+                        # Create keyboard with only "جستجوی دوباره" and "حذف پیام‌ها" (same as real end_chat)
+                        search_again_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [
+                                InlineKeyboardButton(text="🔍 جستجوی دوباره", callback_data="chat:search_again"),
+                            ],
+                            [
+                                InlineKeyboardButton(text="🗑️ حذف پیام‌های من", callback_data="chat:delete_my_messages"),
+                            ],
+                        ])
+                        
+                        # Send end chat message (exactly like real end_chat)
+                        bot = Bot(token=settings.BOT_TOKEN)
+                        await bot.send_message(
+                            telegram_id,
+                            f"💬 چت شما با {virtual_profile_id_text} به پایان رسید\n\n"
+                            f"{user_cost_summary}",
+                            reply_markup=search_again_keyboard
+                        )
+                        # Update reply keyboard
+                        await bot.send_message(
+                            telegram_id,
+                            "📱 منوی اصلی",
+                            reply_markup=get_main_reply_keyboard()
+                        )
+                        await bot.session.close()
+                    except Exception as e:
+                        logger.error(f"Failed to end chat with virtual profile: {e}")
+                
+            except Exception as e:
+                logger.error(f"Failed to create virtual profile for user {user_id}: {e}")
+                # Fallback to normal timeout message
+                bot = Bot(token=settings.BOT_TOKEN)
+                try:
+                    await bot.send_message(
+                        telegram_id,
+                        "❌ متأسفانه کسی رو برات پیدا نکردیم.\n\n"
+                        "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
+                    )
+                    await bot.session.close()
+                except Exception:
+                    pass
+            break
+    else:
+        # User is no longer in queue (removed by matchmaking worker or manually)
+        # IMPORTANT: Still check if they have active chat to avoid race conditions
+        logger.info(f"User {user_id} is no longer in queue (may have been matched or removed), checking if they have active chat")
+        
+        async for db_session in get_db():
+            user = await get_user_by_telegram_id(db_session, telegram_id)
+            if not user:
+                logger.warning(f"User {user_id} not found in DB during virtual profile timeout check (no longer in queue)")
+                break
+            
+            # Check if user has active chat (they were matched successfully)
+            if chat_manager and await chat_manager.is_chat_active(user.id, db_session):
+                # User was matched successfully, don't create virtual profile
+                logger.info(f"User {user_id} has active chat (matched successfully), aborting virtual profile creation")
+                break
+            else:
+                logger.info(f"User {user_id} has no active chat and not in queue, safe to proceed (user cancelled search)")
+            break
 
 
 async def check_matchmaking_timeout(user_id: int, telegram_id: int):
