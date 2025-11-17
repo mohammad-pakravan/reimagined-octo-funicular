@@ -476,6 +476,7 @@ class UserQueueEntry:
     filter_same_province: bool = False  # Match with users from same province
     province: Optional[str] = None  # User's province for filtering
     is_premium: bool = False  # Whether user has premium subscription
+    last_probability_check: float = 0.0  # Timestamp of last probability check (for cooldown)
 
 
 class InMemoryMatchmakingQueue:
@@ -684,17 +685,26 @@ class InMemoryMatchmakingQueue:
                     logger.info(f"Boy {user_id} matched with girl {partner} (random search, premium user, no probability check)")
                     return partner
             else:
-                # Non-premium: check probability
-                probability_roll = random.random()
-                logger.debug(f"Boy {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
-                if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
-                    partner = await pick_from_queue(self._girls_queue)
-                    if partner:
-                        logger.info(f"Boy {user_id} matched with girl {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
-                        return partner
+                # Non-premium: check probability with cooldown
+                current_time = time.time()
+                time_since_last_check = current_time - entry.last_probability_check
+                
+                # Only check probability if cooldown has passed
+                if time_since_last_check >= settings.PROBABILITY_CHECK_COOLDOWN_SECONDS:
+                    probability_roll = random.random()
+                    entry.last_probability_check = current_time  # Update timestamp
+                    logger.debug(f"Boy {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
+                    if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+                        partner = await pick_from_queue(self._girls_queue)
+                        if partner:
+                            logger.info(f"Boy {user_id} matched with girl {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
+                            return partner
+                    else:
+                        logger.debug(f"Boy {user_id} probability check failed for girl match (random search, {probability_roll:.4f} >= {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}), staying in queue (cooldown: {settings.PROBABILITY_CHECK_COOLDOWN_SECONDS}s)")
                 else:
-                    logger.debug(f"Boy {user_id} probability check failed for girl match (random search, {probability_roll:.4f} >= {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}), staying in queue")
-            # If probability check failed, stay in queue (will be checked again in next cycle)
+                    remaining_cooldown = settings.PROBABILITY_CHECK_COOLDOWN_SECONDS - time_since_last_check
+                    logger.debug(f"Boy {user_id} probability check on cooldown ({remaining_cooldown:.1f}s remaining), staying in queue")
+            # If probability check failed or on cooldown, stay in queue (will be checked again after cooldown)
             return None
 
         # Girls
@@ -741,18 +751,27 @@ class InMemoryMatchmakingQueue:
                     logger.info(f"Girl {user_id} matched with boy {partner} (random search, premium user, no probability check)")
                     return partner
             else:
-                # Non-premium: check probability
-                probability_roll = random.random()
-                logger.debug(f"Girl {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
-                if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
-                    partner = await pick_from_queue(self._boys_queue)
-                    if partner:
-                        logger.info(f"Girl {user_id} matched with boy {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
-                        return partner
+                # Non-premium: check probability with cooldown
+                current_time = time.time()
+                time_since_last_check = current_time - entry.last_probability_check
+                
+                # Only check probability if cooldown has passed
+                if time_since_last_check >= settings.PROBABILITY_CHECK_COOLDOWN_SECONDS:
+                    probability_roll = random.random()
+                    entry.last_probability_check = current_time  # Update timestamp
+                    logger.debug(f"Girl {user_id} random search, probability roll: {probability_roll:.4f}, threshold: {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}")
+                    if probability_roll < settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY:
+                        partner = await pick_from_queue(self._boys_queue)
+                        if partner:
+                            logger.info(f"Girl {user_id} matched with boy {partner} (random search, probability check passed: {probability_roll:.4f} < {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY})")
+                            return partner
+                    else:
+                        logger.debug(f"Girl {user_id} probability check failed for boy match (random search, {probability_roll:.4f} >= {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}), staying in queue (cooldown: {settings.PROBABILITY_CHECK_COOLDOWN_SECONDS}s)")
                 else:
-                    logger.debug(f"Girl {user_id} probability check failed for boy match (random search, {probability_roll:.4f} >= {settings.RANDOM_GIRL_BOY_MATCH_PROBABILITY}), staying in queue")
-            # If probability check failed or no boy available, stay in queue
-            # (will be checked again in next worker cycle)
+                    remaining_cooldown = settings.PROBABILITY_CHECK_COOLDOWN_SECONDS - time_since_last_check
+                    logger.debug(f"Girl {user_id} probability check on cooldown ({remaining_cooldown:.1f}s remaining), staying in queue")
+            # If probability check failed or on cooldown, stay in queue
+            # (will be checked again after cooldown)
             # Don't fallback to girl-girl in random search - wait for probability to pass
             return None
 

@@ -26,6 +26,9 @@ from utils.validators import get_display_name
 
 router = Router()
 
+# Track active timeout tasks to prevent duplicates
+_active_timeout_tasks: dict[int, asyncio.Task] = {}
+
 
 class ChatStates(StatesGroup):
     """FSM states for chat."""
@@ -356,6 +359,13 @@ async def add_user_to_queue_direct(
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"DEBUG: User {user_id} adding to queue with preferred_gender: {preferred_gender}, filters: age={filter_same_age}, city={filter_same_city}, province={filter_same_province}, is_premium: {user_premium}")
+    
+    # Cancel any existing timeout task for this user before creating a new one
+    if user_id in _active_timeout_tasks:
+        existing_task = _active_timeout_tasks[user_id]
+        if not existing_task.done():
+            existing_task.cancel()
+            logger.debug(f"Cancelled existing timeout task for user {user_id}")
     await matchmaking_queue.add_user_to_queue(
         user_id=user_id,
         gender=user.gender,
@@ -434,31 +444,64 @@ async def add_user_to_queue_direct(
     
     await state.clear()
     
-    # Create timeout task
-    asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
+    # Cancel any existing timeout task for this user
+    if user_id in _active_timeout_tasks:
+        existing_task = _active_timeout_tasks[user_id]
+        if not existing_task.done():
+            existing_task.cancel()
+            logger.debug(f"Cancelled existing timeout task for user {user_id}")
+    
+    # Create new timeout task
+    timeout_task = asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
+    _active_timeout_tasks[user_id] = timeout_task
+    
+    # Clean up task from dict when done
+    def cleanup_task(task):
+        if user_id in _active_timeout_tasks:
+            del _active_timeout_tasks[user_id]
+    timeout_task.add_done_callback(cleanup_task)
 
 
 async def check_matchmaking_timeout(user_id: int, telegram_id: int):
     """Check if user is still in queue after 2 minutes and notify if no match found."""
-    await asyncio.sleep(120)  # Wait 2 minutes
+    import logging
+    logger = logging.getLogger(__name__)
+    import time as time_module
+    
+    start_time = time_module.time()
+    logger.info(f"Timeout task started for user {user_id}, will check after 120 seconds")
+    
+    try:
+        # Wait exactly 2 minutes (120 seconds)
+        await asyncio.sleep(120)
+        
+        elapsed_time = time_module.time() - start_time
+        logger.info(f"Timeout check triggered for user {user_id} after {elapsed_time:.1f} seconds (expected: 120 seconds)")
+    except asyncio.CancelledError:
+        logger.info(f"Timeout task cancelled for user {user_id}")
+        raise
     
     # Check if user is still in queue
     if matchmaking_queue and await matchmaking_queue.is_user_in_queue(user_id):
+        logger.info(f"User {user_id} is still in queue after 120 seconds, checking for active chat")
         # Before sending timeout message, check if user has active chat
         # If user has active chat, they were matched successfully, don't send timeout
         async for db_session in get_db():
             user = await get_user_by_telegram_id(db_session, telegram_id)
             if not user:
+                logger.warning(f"User {user_id} not found in DB during timeout check")
                 break
             
             # Check if user has active chat
             if chat_manager and await chat_manager.is_chat_active(user.id, db_session):
                 # User has active chat, they were matched successfully
+                logger.info(f"User {user_id} has active chat, removing from queue silently (matched successfully)")
                 # Just remove from queue silently (they might have been matched but not removed from queue)
                 await matchmaking_queue.remove_user_from_queue(user_id)
                 break
             
             # User is still in queue and has no active chat, no match found
+            logger.info(f"User {user_id} still in queue with no active chat after 120 seconds, sending timeout message")
             # Remove from queue
             await matchmaking_queue.remove_user_from_queue(user_id)
             
@@ -471,9 +514,12 @@ async def check_matchmaking_timeout(user_id: int, telegram_id: int):
                     "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
                 )
                 await bot.session.close()
-            except Exception:
-                pass
+                logger.info(f"Timeout message sent to user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to send timeout message to user {user_id}: {e}")
             break
+    else:
+        logger.info(f"User {user_id} is no longer in queue (may have been matched or removed)")
 
 
 @router.callback_query(F.data == "chat:start_search")

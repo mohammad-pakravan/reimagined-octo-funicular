@@ -130,6 +130,10 @@ class Settings(BaseSettings):
         default=0.3,
         description="Probability (0.0-1.0) for girls to match with boys in random chat when no boy-boy pairs exist. Lower = harder for girls to match with boys."
     )
+    PROBABILITY_CHECK_COOLDOWN_SECONDS: int = Field(
+        default=30,
+        description="Cooldown in seconds between probability checks for the same user. Prevents rapid retries that would make 2% probability effectively much higher."
+    )
     
     # No-rematch rule configuration
     ENABLE_NO_REMATCH_RULE: bool = Field(
