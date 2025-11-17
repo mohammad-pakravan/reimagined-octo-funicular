@@ -224,6 +224,9 @@ def get_admin_system_settings_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💰 هزینه پیام چت", callback_data="admin:setting:chat_message_cost"),
         ],
         [
+            InlineKeyboardButton(text="💰 هزینه چت فیلتردار", callback_data="admin:setting:filtered_chat_cost"),
+        ],
+        [
             InlineKeyboardButton(text="📊 تعداد پیام برای کسر سکه", callback_data="admin:setting:chat_success_message_count"),
         ],
         [

@@ -21,6 +21,7 @@ class SystemSettingStates(StatesGroup):
     waiting_payment_gateway_domain = State()
     waiting_zarinpal_merchant_id = State()
     waiting_chat_message_cost = State()
+    waiting_filtered_chat_cost = State()
     waiting_chat_success_message_count = State()
 
 
@@ -37,6 +38,7 @@ async def admin_system_settings(callback: CallbackQuery):
         sandbox = await get_system_setting_value(db_session, 'zarinpal_sandbox', 'true')
         sandbox_text = "فعال" if sandbox.lower() == 'true' else "غیرفعال"
         chat_cost = await get_system_setting_value(db_session, 'chat_message_cost', '1')
+        filtered_chat_cost = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
         success_message_count = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
         
         text = (
@@ -45,6 +47,7 @@ async def admin_system_settings(callback: CallbackQuery):
             f"🔑 Merchant ID زرین‌پال: {merchant_id}\n"
             f"🧪 حالت Sandbox: {sandbox_text}\n"
             f"💰 هزینه هر پیام چت (غیر پریمیوم): {chat_cost} سکه\n"
+            f"💰 هزینه چت فیلتردار: {filtered_chat_cost} سکه\n"
             f"📊 تعداد پیام برای کسر سکه: {success_message_count} پیام\n\n"
             "یکی از تنظیمات را برای ویرایش انتخاب کنید:"
         )
@@ -156,6 +159,53 @@ async def process_setting_chat_message_cost(message: Message, state: FSMContext)
         )
         
         await message.answer(f"✅ هزینه هر پیام چت به {cost} سکه تغییر یافت.")
+        await state.clear()
+        break
+
+
+@router.callback_query(F.data == "admin:setting:filtered_chat_cost")
+async def admin_setting_filtered_chat_cost(callback: CallbackQuery, state: FSMContext):
+    """Set filtered chat cost."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "💰 تنظیم هزینه چت فیلتردار\n\n"
+        "لطفاً تعداد سکه‌ای که برای شروع چت فیلتردار (مثلاً پسر→دختر، دختر→پسر) از کاربران غیر پریمیوم کسر می‌شود را وارد کنید:\n\n"
+        "⚠️ توجه: این سکه برگشت داده نمی‌شود.\n\n"
+        "مثال: 1\n\n"
+        "یا /cancel برای لغو"
+    )
+    await state.set_state(SystemSettingStates.waiting_filtered_chat_cost)
+    await callback.answer()
+
+
+@router.message(StateFilter(SystemSettingStates.waiting_filtered_chat_cost), F.text & ~F.text.startswith("/"))
+async def process_setting_filtered_chat_cost(message: Message, state: FSMContext):
+    """Process filtered chat cost setting."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        cost = int(message.text.strip())
+        if cost < 0:
+            await message.answer("❌ هزینه نمی‌تواند منفی باشد.\n\nلطفاً دوباره وارد کنید:")
+            return
+    except ValueError:
+        await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.\n\nلطفاً دوباره وارد کنید:")
+        return
+    
+    async for db_session in get_db():
+        await set_system_setting(
+            db_session,
+            'filtered_chat_cost',
+            str(cost),
+            'int',
+            'Cost in coins for filtered chat (e.g., boy->girl, girl->boy). Non-refundable. Random chat is free.'
+        )
+        
+        await message.answer(f"✅ هزینه چت فیلتردار به {cost} سکه تغییر یافت.")
         await state.clear()
         break
 

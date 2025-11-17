@@ -318,9 +318,12 @@ async def add_user_to_queue_direct(
     from db.crud import check_user_premium, get_system_setting_value, get_user_points
     user_premium = await check_user_premium(db_session, user.id)
     
-    # Get filtered chat cost (non-refundable)
-    from config.settings import settings
-    filtered_chat_cost = settings.FILTERED_CHAT_COST
+    # Get filtered chat cost from database (non-refundable)
+    filtered_chat_cost_str = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
+    try:
+        filtered_chat_cost = int(filtered_chat_cost_str)
+    except (ValueError, TypeError):
+        filtered_chat_cost = 1  # Default fallback
     
     user_points = await get_user_points(db_session, user.id)
     
@@ -740,11 +743,15 @@ async def check_matchmaking_timeout_with_virtual(
                     logger.info(f"Created chat room {chat_room.id} between user {user.id} and virtual profile {virtual_profile.id} (user_id={virtual_profile.user_id})")
                     
                     # Get user premium status and cost info (like real matchmaking)
-                    from db.crud import check_user_premium, get_user_points
+                    from db.crud import check_user_premium, get_user_points, get_system_setting_value
                     user_premium = await check_user_premium(db_session, user.id)
                     
-                    # Get filtered chat cost (same as real matchmaking)
-                    filtered_chat_cost = settings.FILTERED_CHAT_COST
+                    # Get filtered chat cost from database (same as real matchmaking)
+                    filtered_chat_cost_str = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
+                    try:
+                        filtered_chat_cost = int(filtered_chat_cost_str)
+                    except (ValueError, TypeError):
+                        filtered_chat_cost = 1  # Default fallback
                     
                     user_points = await get_user_points(db_session, user.id)
                     
@@ -813,12 +820,16 @@ async def check_matchmaking_timeout_with_virtual(
                         logger.info(f"Ended chat {chat_room.id} with virtual profile")
                         
                         # Get cost summary for end chat (same as real end_chat_confirm)
-                        from db.crud import check_user_premium, get_user_points
+                        from db.crud import check_user_premium, get_user_points, get_system_setting_value
                         user_premium = await check_user_premium(db_session, user.id)
                         user_current_points = await get_user_points(db_session, user.id)
                         
-                        # Get filtered chat cost
-                        filtered_chat_cost = settings.FILTERED_CHAT_COST
+                        # Get filtered chat cost from database
+                        filtered_chat_cost_str = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
+                        try:
+                            filtered_chat_cost = int(filtered_chat_cost_str)
+                        except (ValueError, TypeError):
+                            filtered_chat_cost = 1  # Default fallback
                         
                         # Helper function to generate cost summary (same as end_chat_confirm)
                         # For virtual profiles, always show as free (no coins were deducted)

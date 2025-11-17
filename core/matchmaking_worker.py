@@ -273,8 +273,13 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             user1_premium = await check_user_premium(db_session, user1.id)
             user2_premium = await check_user_premium(db_session, user2.id)
             
-            # Get filtered chat cost from settings (non-refundable)
-            filtered_chat_cost = settings.FILTERED_CHAT_COST
+            # Get filtered chat cost from database (non-refundable)
+            from db.crud import get_system_setting_value
+            filtered_chat_cost_str = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
+            try:
+                filtered_chat_cost = int(filtered_chat_cost_str)
+            except (ValueError, TypeError):
+                filtered_chat_cost = 1  # Default fallback
             
             # Get user points
             user1_points = await get_user_points(db_session, user1.id)
