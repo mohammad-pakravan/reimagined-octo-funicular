@@ -206,9 +206,9 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
                     f"👤 نام: {get_display_name(user)}\n"
                     f"⚧️ جنسیت: {gender_text}\n"
                     f"🆔 ID: {user_profile_id}\n\n"
-                    f"برای مشاهده پیام از دکمه زیر استفاده کن:",
-                    reply_markup=get_dm_receive_keyboard(dm.id)
-                )
+                f"برای مشاهده پیام از دکمه زیر استفاده کن:",
+                reply_markup=get_dm_receive_keyboard(dm.id)
+            )
             await bot.session.close()
         except Exception as e:
             # If bot can't send message (user blocked bot, etc.), still save the message
