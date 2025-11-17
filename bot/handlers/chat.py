@@ -613,11 +613,14 @@ async def check_matchmaking_timeout_with_virtual(
             # Try 10 times with 1 second delay between attempts
             real_match_found = False
             if matchmaking_queue:
-                for attempt in range(10):
+                for attempt in range(5):
                     logger.info(f"User {user_id}: Attempt {attempt + 1}/10 to find real match before creating virtual profile")
                     match_id = await matchmaking_queue.find_match(user_id)
                     if match_id:
-                        logger.info(f"User {user_id} found real match {match_id} on attempt {attempt + 1}, aborting virtual profile creation")
+                        logger.info(f"User {user_id} found real match {match_id} on attempt {attempt + 1}, connecting users now...")
+                        # Connect the matched users immediately
+                        from core.matchmaking_worker import connect_users
+                        await connect_users(user_id, match_id)
                         real_match_found = True
                         break  # Match found, no need for virtual profile
                     
