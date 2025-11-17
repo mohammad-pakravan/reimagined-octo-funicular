@@ -102,7 +102,7 @@ async def setup_matchmaking():
         matchmaking_queue = InMemoryMatchmakingQueue()
         logger.info("✅ Matchmaking queue initialized (in-memory backend)")
     else:
-    matchmaking_queue = MatchmakingQueue(redis_client)
+        matchmaking_queue = MatchmakingQueue(redis_client)
         logger.info("✅ Matchmaking queue initialized (redis backend)")
     
     return matchmaking_queue
