@@ -408,12 +408,39 @@ async def add_user_to_queue_direct(
         filter_desc.append("🗺️ هم‌استانی")
     filter_text = " | ".join(filter_desc) if filter_desc else "بدون فیلتر"
     
+    # Get active chats count and online users count
+    from db.crud import get_active_chat_count
+    try:
+        active_chats_count = await get_active_chat_count(db_session)
+    except Exception:
+        active_chats_count = 0
+    
+    try:
+        from main import activity_tracker
+        if activity_tracker:
+            online_users_count = await activity_tracker.get_online_users_count()
+        else:
+            online_users_count = 0
+    except Exception:
+        online_users_count = 0
+    
+    # Calculate total active users:
+    # - Users in active chats = active_chats_count × 2 (each chat has 2 users)
+    # - Plus all online users (which includes users in chats and those not in chats)
+    # Total = (active_chats_count × 2) + online_users_count
+    users_in_active_chats = active_chats_count * 2
+    total_active_users = users_in_active_chats + online_users_count
+    
+    # Build status info
+    status_info = f"📊 چت‌های فعال: {active_chats_count} | 👥 آنلاین: {total_active_users}"
+    
     # Build queue status message
     if not user_premium:
         queue_status_text = (
             f"🔍 در حال جستجو...\n\n"
             f"{cost_summary}\n"
-            f"🔎 فیلتر: {filter_text}\n\n"
+            f"🔎 فیلتر: {filter_text}\n"
+            f"{status_info}\n\n"
             f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم...\n\n"
             f"💎✨ با پریمیوم تجربه بهتری داشته باش! ✨💎\n\n"
             f"🎁 ویژگی‌های پریمیوم:\n"
@@ -427,7 +454,8 @@ async def add_user_to_queue_direct(
         queue_status_text = (
             f"🔍 در حال جستجو...\n\n"
             f"{cost_summary}\n"
-            f"🔎 فیلتر: {filter_text}\n\n"
+            f"🔎 فیلتر: {filter_text}\n"
+            f"{status_info}\n\n"
             f"⏳  لطفاً صبر کنید در حال جستجوی مخاطب شما هستم..."
         )
     
