@@ -123,39 +123,39 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                         user2_telegram_id,
                         settings.NO_REMATCH_HOURS,
                     )
-                # Users were removed from queue in find_match, but match failed
-                # We need to re-add them to queue so they can try matching with others
-                # Get user data from DB to re-add them
-                user1_data = await matchmaking_queue.get_user_data(user1_telegram_id)
-                if not user1_data:
-                    # Try to get from DB and re-add (get_user_by_telegram_id is already imported at top)
-                    user1_obj = await get_user_by_telegram_id(db_session, user1_telegram_id)
-                    if user1_obj:
-                        from db.crud import check_user_premium
-                        user1_premium = await check_user_premium(db_session, user1_obj.id)
-                        await matchmaking_queue.add_user_to_queue(
-                            user_id=user1_telegram_id,
-                            gender=user1_obj.gender,
-                            city=user1_obj.city,
-                            age=user1_obj.age,
-                            preferred_gender=None,  # Will be lost, but better than nothing
-                            is_premium=user1_premium,
-                        )
-                user2_data = await matchmaking_queue.get_user_data(user2_telegram_id)
-                if not user2_data:
-                    user2_obj = await get_user_by_telegram_id(db_session, user2_telegram_id)
-                    if user2_obj:
-                        from db.crud import check_user_premium
-                        user2_premium = await check_user_premium(db_session, user2_obj.id)
-                        await matchmaking_queue.add_user_to_queue(
-                            user_id=user2_telegram_id,
-                            gender=user2_obj.gender,
-                            city=user2_obj.city,
-                            age=user2_obj.age,
-                            preferred_gender=None,
-                            is_premium=user2_premium,
-                        )
-                return
+                    # Users were removed from queue in find_match, but match failed
+                    # We need to re-add them to queue so they can try matching with others
+                    # Get user data from DB to re-add them
+                    user1_data = await matchmaking_queue.get_user_data(user1_telegram_id)
+                    if not user1_data:
+                        # Try to get from DB and re-add (get_user_by_telegram_id is already imported at top)
+                        user1_obj = await get_user_by_telegram_id(db_session, user1_telegram_id)
+                        if user1_obj:
+                            from db.crud import check_user_premium
+                            user1_premium = await check_user_premium(db_session, user1_obj.id)
+                            await matchmaking_queue.add_user_to_queue(
+                                user_id=user1_telegram_id,
+                                gender=user1_obj.gender,
+                                city=user1_obj.city,
+                                age=user1_obj.age,
+                                preferred_gender=None,  # Will be lost, but better than nothing
+                                is_premium=user1_premium,
+                            )
+                    user2_data = await matchmaking_queue.get_user_data(user2_telegram_id)
+                    if not user2_data:
+                        user2_obj = await get_user_by_telegram_id(db_session, user2_telegram_id)
+                        if user2_obj:
+                            from db.crud import check_user_premium
+                            user2_premium = await check_user_premium(db_session, user2_obj.id)
+                            await matchmaking_queue.add_user_to_queue(
+                                user_id=user2_telegram_id,
+                                gender=user2_obj.gender,
+                                city=user2_obj.city,
+                                age=user2_obj.age,
+                                preferred_gender=None,
+                                is_premium=user2_premium,
+                            )
+                    return
             
             # Check if either user already has active chat
             logger.info(f"Checking active chat for {user1_telegram_id} and {user2_telegram_id}")
