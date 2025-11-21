@@ -713,9 +713,12 @@ async def unban_user(session: AsyncSession, user_id: int) -> bool:
     return result.rowcount > 0
 
 
-async def get_all_users(session: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
-    """Get all users with pagination."""
-    result = await session.execute(select(User).offset(skip).limit(limit))
+async def get_all_users(session: AsyncSession, skip: int = 0, limit: int = None) -> List[User]:
+    """Get all users with pagination. If limit is None, returns all users."""
+    query = select(User).offset(skip)
+    if limit is not None:
+        query = query.limit(limit)
+    result = await session.execute(query)
     return list(result.scalars().all())
 
 
@@ -1898,6 +1901,7 @@ async def get_user_badges(session: AsyncSession, user_id: int) -> List[UserBadge
         select(UserBadge)
         .where(UserBadge.user_id == user_id)
         .order_by(UserBadge.earned_at.desc())
+        .options(joinedload(UserBadge.badge))
     )
     return list(result.scalars().all())
 

@@ -111,3 +111,7 @@ docker-compose -f docker-compose.test.yml down -v
 3. برای تست حتماً یک Bot Token جداگانه از BotFather بگیرید
 4. تنظیمات MinIO را برای محیط تست جدا نگه دارید (یا bucket جدید استفاده کنید)
 
+
+
+
+

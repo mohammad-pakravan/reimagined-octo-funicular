@@ -113,6 +113,12 @@ class BroadcastStates(StatesGroup):
     waiting_rate = State()
 
 
+class QueueBroadcastStates(StatesGroup):
+    """FSM states for queue-based broadcast."""
+    waiting_message = State()
+    waiting_confirmation = State()
+
+
 class CreateReferralLinkStates(StatesGroup):
     """FSM states for creating referral link."""
     waiting_code = State()
@@ -321,8 +327,8 @@ async def process_broadcast_rate(message: Message, state: FSMContext):
     
     # Create broadcast message in database first
     async for db_session in get_db():
-        # Get all users first
-        users = await get_all_users(db_session)
+        # Get all users first (no limit - get ALL users)
+        users = await get_all_users(db_session, limit=None)
         
         # Create progress message with control buttons
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -691,6 +697,211 @@ async def cmd_broadcast_list(message: Message):
         
         await message.answer(text, parse_mode=None)
         break
+
+
+# ==================== Queue-Based Broadcast ====================
+
+@router.message(Command("admin_broadcast_queue"))
+async def cmd_admin_broadcast_queue(message: Message, state: FSMContext):
+    """Start queue-based broadcast process (recommended for 100k+ users)."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ دسترسی محدود است.")
+        return
+
+    await message.answer(
+        "📢 <b>ارسال پیام همگانی (سیستم صف)</b>\n\n"
+        "این سیستم برای ارسال به تعداد زیاد کاربر (100k+) بهینه شده است.\n\n"
+        "✅ <b>ویژگی‌ها:</b>\n"
+        "• ارسال با سرعت 15 پیام/ثانیه\n"
+        "• مدیریت خودکار FloodWait\n"
+        "• پردازش در پس‌زمینه\n"
+        "• تلاش مجدد در صورت خطا\n\n"
+        "📝 لطفاً پیام خود را ارسال کنید:\n"
+        "• متن\n"
+        "• عکس با کپشن\n"
+        "• ویدیو با کپشن\n"
+        "• فایل با کپشن\n"
+        "• پیام فوروارد شده",
+        parse_mode='HTML'
+    )
+    await state.set_state(QueueBroadcastStates.waiting_message)
+
+
+@router.message(QueueBroadcastStates.waiting_message)
+async def process_queue_broadcast_message(message: Message, state: FSMContext):
+    """Process broadcast message for queue system."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ دسترسی محدود است.")
+        return
+
+    # Determine message type and extract content
+    message_type = "text"
+    message_text = None
+    message_file_id = None
+    message_caption = None
+    forwarded_from_chat_id = None
+    forwarded_from_message_id = None
+
+    if message.forward_from_chat or message.forward_from_message_id:
+        # Forwarded message
+        message_type = "forward"
+        forwarded_from_chat_id = message.forward_from_chat.id if message.forward_from_chat else None
+        forwarded_from_message_id = message.forward_from_message_id
+        message_text = message.text or message.caption
+        message_caption = message.caption
+    elif message.photo:
+        message_type = "photo"
+        message_file_id = message.photo[-1].file_id
+        message_caption = message.caption
+        message_text = message.caption
+    elif message.video:
+        message_type = "video"
+        message_file_id = message.video.file_id
+        message_caption = message.caption
+        message_text = message.caption
+    elif message.document:
+        message_type = "document"
+        message_file_id = message.document.file_id
+        message_caption = message.caption
+        message_text = message.caption or message.document.file_name
+    elif message.audio:
+        message_type = "audio"
+        message_file_id = message.audio.file_id
+        message_caption = message.caption
+        message_text = message.caption
+    elif message.voice:
+        message_type = "voice"
+        message_file_id = message.voice.file_id
+        message_caption = message.caption
+        message_text = message.caption
+    elif message.video_note:
+        message_type = "video_note"
+        message_file_id = message.video_note.file_id
+    elif message.animation:
+        message_type = "animation"
+        message_file_id = message.animation.file_id
+        message_caption = message.caption
+        message_text = message.caption
+    elif message.sticker:
+        message_type = "sticker"
+        message_file_id = message.sticker.file_id
+    elif message.text:
+        message_type = "text"
+        message_text = message.text
+    else:
+        await message.answer("❌ نوع پیام پشتیبانی نمی‌شود.")
+        await state.clear()
+        return
+
+    # Store message data in FSM
+    await state.update_data(
+        admin_id=message.from_user.id,
+        message_type=message_type,
+        message_text=message_text,
+        message_file_id=message_file_id,
+        message_caption=message_caption,
+        forwarded_from_chat_id=forwarded_from_chat_id,
+        forwarded_from_message_id=forwarded_from_message_id
+    )
+
+    # Get user count
+    async for db_session in get_db():
+        from utils.broadcast_service import BroadcastService
+        broadcast_service = BroadcastService()
+        user_stats = await broadcast_service.get_user_stats(db_session)
+        total_users = user_stats.get('active', 0)
+
+        # Calculate estimated time
+        messages_per_second = 15
+        estimated_minutes = total_users / messages_per_second / 60
+
+        # Show preview and ask for confirmation
+        preview_text = "📢 <b>پیش‌نمایش پیام همگانی</b>\n\n"
+        preview_text += f"📝 نوع: {message_type}\n"
+        if message_text:
+            preview_text += f"💬 متن: {message_text[:100]}...\n" if len(message_text) > 100 else f"💬 متن: {message_text}\n"
+        preview_text += f"\n👥 <b>کاربران فعال:</b> {total_users:,}\n"
+        preview_text += f"⏱ <b>زمان تقریبی:</b> {estimated_minutes:.1f} دقیقه\n"
+        preview_text += f"🚀 <b>سرعت:</b> 15 پیام/ثانیه\n\n"
+        preview_text += "⚠️ <b>توجه:</b> پیام به صف اضافه می‌شود و در پس‌زمینه ارسال خواهد شد.\n\n"
+        preview_text += "آیا می‌خواهید ادامه دهید؟"
+
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ تأیید و ارسال", callback_data="queue_broadcast:confirm"),
+                InlineKeyboardButton(text="❌ لغو", callback_data="queue_broadcast:cancel")
+            ]
+        ])
+
+        await message.answer(preview_text, parse_mode='HTML', reply_markup=confirm_keyboard)
+        await state.set_state(QueueBroadcastStates.waiting_confirmation)
+        break
+
+
+@router.callback_query(F.data == "queue_broadcast:confirm")
+async def confirm_queue_broadcast(callback: CallbackQuery, state: FSMContext):
+    """Confirm and create broadcast in queue."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+
+    # Get stored message data
+    data = await state.get_data()
+    if not data:
+        await callback.message.edit_text("❌ خطا: داده‌های پیام یافت نشد.")
+        await state.clear()
+        return
+
+    async for db_session in get_db():
+        try:
+            from utils.broadcast_service import BroadcastService
+            broadcast_service = BroadcastService()
+
+            # Create broadcast in database
+            broadcast = await broadcast_service.create_broadcast_message(
+                session=db_session,
+                admin_id=data['admin_id'],
+                message_type=data['message_type'],
+                message_text=data.get('message_text'),
+                message_file_id=data.get('message_file_id'),
+                message_caption=data.get('message_caption'),
+                forwarded_from_chat_id=data.get('forwarded_from_chat_id'),
+                forwarded_from_message_id=data.get('forwarded_from_message_id'),
+            )
+
+            await callback.message.edit_text(
+                f"✅ <b>پیام همگانی در صف قرار گرفت!</b>\n\n"
+                f"📋 <b>شناسه:</b> {broadcast.id}\n"
+                f"📝 <b>نوع:</b> {broadcast.message_type}\n"
+                f"📊 <b>وضعیت:</b> در انتظار پردازش\n\n"
+                f"⏳ پیام به زودی توسط سیستم پردازش و ارسال خواهد شد.\n\n"
+                f"💡 برای مشاهده وضعیت:\n"
+                f"/admin_broadcast_stats {broadcast.id}",
+                parse_mode='HTML'
+            )
+            
+            await state.clear()
+            await callback.answer("✅ پیام در صف قرار گرفت!")
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error creating queue broadcast: {e}")
+            await callback.message.edit_text(
+                f"❌ خطا در ایجاد پیام همگانی:\n{str(e)}"
+            )
+            await state.clear()
+        
+        break
+
+
+@router.callback_query(F.data == "queue_broadcast:cancel")
+async def cancel_queue_broadcast(callback: CallbackQuery, state: FSMContext):
+    """Cancel queue broadcast creation."""
+    await callback.message.edit_text("❌ ارسال پیام همگانی لغو شد.")
+    await state.clear()
+    await callback.answer("لغو شد")
 
 
 @router.callback_query(F.data.startswith("admin:referral_link:delete:"))

@@ -163,6 +163,13 @@ async def setup_bot():
     storage = RedisStorage(redis=redis_client)
     dp = Dispatcher(storage=storage)
     
+    # Setup broadcast processor
+    from core.broadcast_processor import BroadcastProcessor
+    broadcast_processor = BroadcastProcessor(bot)
+    
+    # Store broadcast processor for scheduler
+    dp['broadcast_processor'] = broadcast_processor
+    
     # Setup matchmaking, chat manager, rate limiter, and activity tracker
     await setup_matchmaking()
     await setup_chat_manager()
@@ -195,6 +202,9 @@ async def setup_bot():
     
     # Start activity checker worker in background
     asyncio.create_task(run_activity_checker())
+    
+    # Start broadcast processor worker in background
+    asyncio.create_task(run_broadcast_processor(dp['broadcast_processor']))
     
     # Register middlewares
     dp.message.middleware(RateLimitMiddleware(rate_limiter))
@@ -253,6 +263,30 @@ async def setup_bot():
     logger.info("✅ Bot handlers registered")
     
     return bot, dp
+
+
+async def run_broadcast_processor(broadcast_processor):
+    """Background task to process pending broadcast messages."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Wait a bit before starting to ensure everything is initialized
+    await asyncio.sleep(5)
+    logger.info("📢 Broadcast processor worker started (checking every 15 seconds)")
+    
+    while True:
+        try:
+            await asyncio.sleep(15)  # Check every 15 seconds
+            
+            if not broadcast_processor:
+                continue
+            
+            # Process pending broadcasts
+            await broadcast_processor.process_pending_broadcasts()
+            
+        except Exception as e:
+            logger.error(f"Error in broadcast processor: {e}", exc_info=True)
+            await asyncio.sleep(60)  # Wait longer on error
 
 
 async def run_activity_checker():

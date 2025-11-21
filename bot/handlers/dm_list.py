@@ -311,7 +311,6 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             user_points = await get_user_points(db_session, user.id)
             if user_points < 1:
                 await callback.answer("❌ سکه کافی نداری!", show_alert=True)
-                await state.clear()
                 return
             
             # Deduct 1 coin
@@ -325,8 +324,7 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             )
             if not success:
                 await callback.answer("❌ خطا در کسر سکه.", show_alert=True)
-            await state.clear()
-            return
+                return
         
         # Create direct message (reply)
         dm = await create_direct_message(

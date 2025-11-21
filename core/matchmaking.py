@@ -648,6 +648,15 @@ class InMemoryMatchmakingQueue:
                 # Check filters
                 if not matches_filters(entry, candidate_entry):
                     continue  # Skip this candidate, try next
+
+                # Ensure candidate accepts the requesting user's gender
+                candidate_pref_gender = candidate_entry.preferred_gender
+                if candidate_pref_gender and candidate_pref_gender != entry.gender:
+                    logger.debug(
+                        f"Skipping candidate {candidate_id}: candidate prefers {candidate_pref_gender}, "
+                        f"does not accept {entry.gender}"
+                    )
+                    continue
                 
                 # Reserve both in queues (remove from queue lists, keep user_data)
                 if user_id in self._boys_queue:
