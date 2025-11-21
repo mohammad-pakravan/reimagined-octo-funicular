@@ -56,14 +56,6 @@ class UserActivityTracker:
         exists = await self.redis.exists(key)
         return bool(exists)
     
-    async def get_online_users_count(self) -> int:
-        """Get count of all currently online users."""
-        pattern = f"{self.activity_prefix}:*"
-        count = 0
-        async for key in self.redis.scan_iter(match=pattern):
-            count += 1
-        return count
-    
     async def get_last_activity(self, telegram_id: int) -> Optional[datetime]:
         """Get user's last activity timestamp."""
         key = self._get_activity_key(telegram_id)
