@@ -43,18 +43,15 @@ CREATE TABLE IF NOT EXISTS system_settings (
     INDEX idx_setting_key (setting_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert default payment gateway domain setting
-INSERT INTO system_settings (setting_key, setting_value, setting_type, description, created_at, updated_at)
-VALUES ('payment_gateway_domain', 'https://payment.example.com', 'string', 'Payment gateway Flask server domain URL', NOW(), NOW())
-ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW();
+-- Insert default payment gateway domain setting (only if not exists)
+INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, description, created_at, updated_at)
+VALUES ('payment_gateway_domain', 'https://payment.example.com', 'string', 'Payment gateway Flask server domain URL', NOW(), NOW());
 
--- Insert Zarinpal merchant ID setting (should be set by admin)
-INSERT INTO system_settings (setting_key, setting_value, setting_type, description, created_at, updated_at)
-VALUES ('zarinpal_merchant_id', '', 'string', 'Zarinpal merchant ID for payment gateway', NOW(), NOW())
-ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW();
+-- Insert Zarinpal merchant ID setting (only if not exists - admin should set this via admin panel)
+INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, description, created_at, updated_at)
+VALUES ('zarinpal_merchant_id', '', 'string', 'Zarinpal merchant ID for payment gateway', NOW(), NOW());
 
--- Insert Zarinpal sandbox mode setting
-INSERT INTO system_settings (setting_key, setting_value, setting_type, description, created_at, updated_at)
-VALUES ('zarinpal_sandbox', 'true', 'bool', 'Enable Zarinpal sandbox mode for testing', NOW(), NOW())
-ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW();
+-- Insert Zarinpal sandbox mode setting (only if not exists)
+INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, description, created_at, updated_at)
+VALUES ('zarinpal_sandbox', 'true', 'bool', 'Enable Zarinpal sandbox mode for testing', NOW(), NOW());
 

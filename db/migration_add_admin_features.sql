@@ -60,13 +60,12 @@ CREATE TABLE IF NOT EXISTS coin_settings (
     INDEX idx_is_active (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert default coin settings
-INSERT INTO coin_settings (premium_days, coins_required, is_active, created_at, updated_at) VALUES
+-- Insert default coin settings (only if not exists - preserves admin changes on restart)
+INSERT IGNORE INTO coin_settings (premium_days, coins_required, is_active, created_at, updated_at) VALUES
 (1, 200, TRUE, NOW(), NOW()),
 (3, 400, TRUE, NOW(), NOW()),
 (7, 800, TRUE, NOW(), NOW()),
-(30, 3000, TRUE, NOW(), NOW())
-ON DUPLICATE KEY UPDATE coins_required = VALUES(coins_required), updated_at = NOW();
+(30, 3000, TRUE, NOW(), NOW());
 
 -- Create broadcast_messages table - Store broadcast messages with statistics
 CREATE TABLE IF NOT EXISTS broadcast_messages (

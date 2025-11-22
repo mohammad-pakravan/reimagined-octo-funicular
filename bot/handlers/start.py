@@ -10,10 +10,9 @@ from aiogram.fsm.context import FSMContext
 
 from db.database import get_db
 from db.crud import get_user_by_telegram_id, get_payment_transaction_by_transaction_id, check_user_premium, get_premium_plan_by_id, get_coin_package_by_id, get_active_mandatory_channels
-from bot.keyboards.common import get_main_menu_keyboard, get_gender_keyboard, get_channel_check_keyboard
+from bot.keyboards.common import get_gender_keyboard, get_channel_check_keyboard
 from bot.keyboards.reply import remove_keyboard, get_main_reply_keyboard
 from bot.keyboards.admin import get_admin_reply_keyboard
-from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
 from config.settings import settings
 
 router = Router()
@@ -60,14 +59,12 @@ async def check_payment_status(message: Message, transaction_id: str):
                     await message.answer(
                         f"✅ پرداخت موفق!\n\n"
                         f"💰 پکیج «{package_name}» به حساب شما اضافه شد!\n\n"
-                        f"💎 موجودی فعلی: {current_balance:,} سکه",
-                        reply_markup=get_main_menu_keyboard()
+                        f"💎 موجودی فعلی: {current_balance:,} سکه"
                     )
                 else:
                     await message.answer(
                         f"✅ پرداخت موفق!\n\n"
-                        f"💰 سکه‌های خریداری شده به حساب شما اضافه شد!",
-                        reply_markup=get_main_menu_keyboard()
+                        f"💰 سکه‌های خریداری شده به حساب شما اضافه شد!"
                     )
             elif transaction.plan_id:
                 # This is a premium purchase
@@ -83,21 +80,18 @@ async def check_payment_status(message: Message, transaction_id: str):
                         f"✅ پرداخت موفق!\n\n"
                         f"💎 اشتراک پریمیوم «{plan_name}» فعال شد!\n\n"
                         f"📅 تاریخ انقضا: {expires_at}\n\n"
-                        f"از این به بعد می‌توانید از تمام امکانات پریمیوم استفاده کنید.",
-                        reply_markup=get_premium_rewards_menu_keyboard()
+                        f"از این به بعد می‌توانید از تمام امکانات پریمیوم و ربات به صورت رایگان استفاده کنید."
                     )
                 else:
                     await message.answer(
                         f"✅ پرداخت موفق!\n\n"
-                        f"💎 اشتراک پریمیوم «{plan_name}» فعال شد!",
-                        reply_markup=get_main_menu_keyboard()
+                        f"💎 اشتراک پریمیوم «{plan_name}» فعال شد!"
                     )
             else:
                 # Unknown transaction type
                 await message.answer(
                     f"✅ پرداخت موفق!\n\n"
-                    f"خرید شما با موفقیت انجام شد.",
-                    reply_markup=get_main_menu_keyboard()
+                    f"خرید شما با موفقیت انجام شد."
                 )
         elif transaction.status == 'failed':
             await message.answer(

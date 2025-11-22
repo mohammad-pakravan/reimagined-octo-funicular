@@ -1010,7 +1010,7 @@ async def try_find_match(telegram_id: int, db_session):
                         if is_premium:
                             return "💰 هزینه: رایگان (پریمیوم)"
                         elif pref_gender is None:
-                            return "💰 هزینه: رایگان (همه)"
+                            return "💰 هزینه: رایگان (شانسی)"
                         elif coins_deducted:
                             return f"💰 {chat_cost} سکه کسر شد (باقی‌مانده: {points})"
                         else:

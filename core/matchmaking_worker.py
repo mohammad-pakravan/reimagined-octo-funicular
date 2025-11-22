@@ -324,19 +324,16 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                 display_name = get_display_name(user_obj)
                 return display_name if display_name else "کاربر"
 
-            def build_connection_msg(target, peer):
+            def build_connection_msg(target_user, peer, cost_summary):
                 peer_ref = format_profile_ref(peer)
                 return (
                     "✅ هم‌چت پیدا شد!\n\n"
-             
-                    f"💰 هزینه این چت {filtered_chat_cost} \n"
-                    " در صورت موفقیت چت، ازت کسر می‌شود.\n"
-
+                    f"{cost_summary}\n\n"
                     "💬 به دوستت سلام کن"
                 )
 
-            user1_msg = build_connection_msg(user1, user2)
-            user2_msg = build_connection_msg(user2, user1)
+            user1_msg = build_connection_msg(user1, user2, user1_cost_summary)
+            user2_msg = build_connection_msg(user2, user1, user2_cost_summary)
             
             
             await bot_instance.send_message(

@@ -29,14 +29,7 @@ ALTER TABLE payment_transactions
 ADD COLUMN coin_package_id INT DEFAULT NULL AFTER plan_id,
 ADD FOREIGN KEY (coin_package_id) REFERENCES coin_packages(id);
 
--- Insert sample coin packages (optional - admin can create these via admin panel)
-INSERT INTO coin_packages (package_name, coin_amount, price, discount_percent, stars_required, payment_methods_json, is_active, is_visible, display_order, created_at, updated_at)
-VALUES 
-    ('100 سکه', 100, 10000, 0, 50, '["shaparak", "stars"]', TRUE, TRUE, 1, NOW(), NOW()),
-    ('500 سکه', 500, 45000, 0, 225, '["shaparak", "stars"]', TRUE, TRUE, 2, NOW(), NOW()),
-    ('1000 سکه', 1000, 80000, 0, 400, '["shaparak", "stars"]', TRUE, TRUE, 3, NOW(), NOW()),
-    ('2500 سکه', 2500, 180000, 0, 900, '["shaparak", "stars"]', TRUE, TRUE, 4, NOW(), NOW());
-
 -- Note: Admins can manage coin packages through the admin panel at:
 -- /admin -> 🪙 مدیریت پکیج‌های سکه
+-- Sample data should be created by admin via admin panel, not in migration
 
