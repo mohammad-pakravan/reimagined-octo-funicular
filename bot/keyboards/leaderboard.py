@@ -17,7 +17,7 @@ def get_leaderboard_main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="❤️ بیشترین لایک", callback_data="leaderboard:likes"),
         ],
         [
-            InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:main"),
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
         ],
     ])
     return keyboard

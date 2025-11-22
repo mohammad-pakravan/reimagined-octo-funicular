@@ -2,7 +2,9 @@
 Admin handler for the bot.
 Handles admin commands like broadcast, ban, stats, etc.
 """
+from datetime import datetime, timedelta
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -15,6 +17,12 @@ from db.crud import (
     get_user_count,
     get_active_chat_count,
     get_premium_count,
+    get_user_gender_counts,
+    get_new_user_count,
+    get_referral_count,
+    get_daily_reward_count,
+    get_payment_summary,
+    get_chat_summary,
     get_all_users,
     ban_user,
     unban_user,
@@ -58,6 +66,7 @@ from db.crud import (
     delete_mandatory_channel,
     get_active_mandatory_channels,
 )
+from db.models import User
 from bot.keyboards.common import get_admin_keyboard, get_main_menu_keyboard
 from bot.keyboards.admin import (
     get_admin_main_keyboard,
@@ -68,6 +77,7 @@ from bot.keyboards.admin import (
     get_coin_reward_list_keyboard,
     get_referral_link_list_keyboard,
     get_referral_link_detail_keyboard,
+    get_admin_stats_keyboard,
     get_mandatory_channels_keyboard,
     get_mandatory_channel_list_keyboard,
     get_mandatory_channel_detail_keyboard,
@@ -82,6 +92,7 @@ from bot.keyboards.premium_plan import (
     get_premium_plan_detail_keyboard,
 )
 from config.settings import settings
+from sqlalchemy import select, or_
 
 router = Router()
 
@@ -111,6 +122,11 @@ class BroadcastStates(StatesGroup):
     """FSM states for broadcast."""
     waiting_message = State()
     waiting_rate = State()
+
+
+class DirectUserMessageStates(StatesGroup):
+    """FSM states for direct admin messages."""
+    waiting_text = State()
 
 
 class QueueBroadcastStates(StatesGroup):
@@ -148,6 +164,14 @@ class PremiumPlanStates(StatesGroup):
     waiting_display_order = State()
 
 
+class CoinPackageStates(StatesGroup):
+    """FSM states for coin package management."""
+    waiting_package_name = State()
+    waiting_coin_amount = State()
+    waiting_price = State()
+    waiting_stars = State()
+
+
 class MandatoryChannelStates(StatesGroup):
     """FSM states for mandatory channel management."""
     waiting_channel_id = State()
@@ -161,27 +185,218 @@ def is_admin(user_id: int) -> bool:
     return user_id in settings.ADMIN_IDS
 
 
+async def resolve_direct_target(session, identifier: str):
+    """Resolve a user either by telegram_id, username, or profile_id."""
+    clean_value = identifier.strip()
+    if clean_value.startswith("@"):
+        clean_value = clean_value[1:]
+
+    target_user = None
+    if clean_value.isdigit():
+        target_user = await get_user_by_telegram_id(session, int(clean_value))
+
+    if not target_user:
+        stmt = select(User).where(
+            or_(
+                User.username == clean_value,
+                User.profile_id == clean_value,
+                User.telegram_id == (int(clean_value) if clean_value.isdigit() else None),
+            ),
+            User.is_active == True,
+            User.is_banned == False,
+            User.is_virtual == False
+        )
+        result = await session.execute(stmt)
+        target_user = result.scalar_one_or_none()
+    return target_user
+
+
+async def build_admin_stats_text(db_session):
+    """Compose the detailed admin statistics text."""
+    now = datetime.utcnow()
+    yesterday = now - timedelta(days=1)
+    week_ago = now - timedelta(days=7)
+
+    total_users = await get_user_count(db_session)
+    gender_counts = await get_user_gender_counts(db_session)
+    premium_users = await get_premium_count(db_session)
+    new_users_24h = await get_new_user_count(db_session, yesterday)
+    new_users_week = await get_new_user_count(db_session, week_ago)
+    chat_summary = await get_chat_summary(db_session)
+
+    premium_24h_count, premium_24h_revenue = await get_payment_summary(
+        db_session,
+        since=yesterday,
+        plan_only=True
+    )
+    premium_week_count, premium_week_revenue = await get_payment_summary(
+        db_session,
+        since=week_ago,
+        plan_only=True
+    )
+    coin_24h_count, coin_24h_revenue = await get_payment_summary(
+        db_session,
+        since=yesterday,
+        coin_only=True
+    )
+    coin_week_count, coin_week_revenue = await get_payment_summary(
+        db_session,
+        since=week_ago,
+        coin_only=True
+    )
+    total_payment_count, total_payment_amount = await get_payment_summary(db_session)
+    referrals_24h = await get_referral_count(db_session, since=yesterday)
+    referrals_week = await get_referral_count(db_session, since=week_ago)
+    daily_rewards_24h = await get_daily_reward_count(db_session, since=yesterday)
+    daily_rewards_week = await get_daily_reward_count(db_session, since=week_ago)
+
+    gender_map = {
+        "male": "پسر",
+        "female": "دختر",
+        "other": "سایر",
+        "نامشخص": "نامشخص"
+    }
+    gender_entries = []
+    for key in ("male", "female", "other", "نامشخص"):
+        value = gender_counts.get(key)
+        if value:
+            gender_entries.append(f"{gender_map.get(key, key)}: {value}")
+    gender_display = " / ".join(gender_entries) if gender_entries else "تعیین نشده"
+
+    non_premium_users = max(total_users - premium_users, 0)
+    premium_pct = (premium_users / total_users * 100) if total_users else 0
+
+    top_referrers = await get_top_users_by_referrals(db_session, limit=3)
+
+    lines = [
+        "📊 آمار کامل ربات",
+        "",
+        "👥 کاربران",
+        f"• کل کاربران: {total_users}",
+        f"• جنسیت‌ها: {gender_display}",
+        f"• کاربران پریمیوم: {premium_users} ({premium_pct:.1f}٪) / غیرپریمیوم: {non_premium_users}",
+        f"• کاربران جدید: 24ساعت={new_users_24h} | 7روز={new_users_week}",
+        "",
+        "💬 چت‌ها",
+        f"• چت‌های فعال: {chat_summary['active']}",
+        f"• چت‌های تمام‌شده: {chat_summary['ended']}",
+        "",
+        "💰 درآمد و تراکنش‌ها",
+        f"• پریمیوم 24ساعت: {premium_24h_count} خرید | {premium_24h_revenue:,.0f} تومان",
+        f"• پریمیوم 7روز: {premium_week_count} خرید | {premium_week_revenue:,.0f} تومان",
+        f"• سکه 24ساعت: {coin_24h_count} خرید | {coin_24h_revenue:,.0f} تومان",
+        f"• سکه 7روز: {coin_week_count} خرید | {coin_week_revenue:,.0f} تومان",
+        f"• کل پرداخت‌ها: {total_payment_count} تراکنش | {total_payment_amount:,.0f} تومان",
+        "",
+        "🎯 مشارکت / پاداش",
+        f"• دعوت‌های جدید: 24ساعت={referrals_24h} | 7روز={referrals_week}",
+        f"• سکه رایگان روزانه: 24ساعت={daily_rewards_24h} | 7روز={daily_rewards_week}",
+        "",
+        "⭐ دعوت‌کنندگان برتر",
+    ]
+
+    if top_referrers:
+        for user_id, count, rank, display_name, profile_id, gender in top_referrers:
+            profile_link = format_profile_id(profile_id)
+            display_name = display_name or f"User {profile_link or user_id}"
+            lines.append(
+                f"• {rank}. {display_name} ({count} دعوت) "
+                f"{f'| {profile_link}' if profile_link else ''}"
+            )
+    else:
+        lines.append("• هنوز دعوتی ثبت نشده است.")
+
+    return "\n".join(line for line in lines if line is not None)
+
+
 @router.message(Command("admin_stats"))
 async def cmd_admin_stats(message: Message):
     """Get admin statistics."""
     if not is_admin(message.from_user.id):
-        await message.answer("❌ Access denied.")
+        await message.answer("❌ دسترسی محدود است.")
         return
-    
+
     async for db_session in get_db():
-        total_users = await get_user_count(db_session)
-        active_chats = await get_active_chat_count(db_session)
-        premium_users = await get_premium_count(db_session)
-        
+        text = await build_admin_stats_text(db_session)
         await message.answer(
-            f"📊 Admin Statistics\n\n"
-            f"👥 Total Users: {total_users}\n"
-            f"💬 Active Chats: {active_chats}\n"
-            f"💎 Premium Users: {premium_users}\n\n"
-            f"Admin Panel:",
-            reply_markup=get_admin_keyboard()
+            text,
+            reply_markup=get_admin_stats_keyboard()
         )
         break
+
+
+@router.callback_query(F.data == "admin:stats:full")
+async def admin_stats_full(callback: CallbackQuery):
+    """Show refreshed admin stats."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+
+    async for db_session in get_db():
+        text = await build_admin_stats_text(db_session)
+        keyboard = get_admin_stats_keyboard()
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard)
+        except Exception:
+            await callback.message.answer(text, reply_markup=keyboard)
+        await callback.answer()
+        break
+
+
+@router.message(F.text.startswith("/direct_user_"))
+async def direct_user_command(message: Message, state: FSMContext):
+    """Allow admin to initiate a direct message to a user."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ دسترسی محدود است.")
+        return
+
+    identifier = message.text[len("/direct_user_"):].strip()
+    if not identifier:
+        await message.answer("❌ لطفاً کد کاربری یا شناسه تلگرام را بعد از /direct_user_ وارد کنید.")
+        return
+
+    async for db_session in get_db():
+        target_user = await resolve_direct_target(db_session, identifier)
+        if not target_user:
+            await message.answer("❌ کاربر مورد نظر یافت نشد.")
+            return
+
+        await state.update_data(direct_target_id=target_user.telegram_id)
+        mention = target_user.username or format_profile_id(target_user.profile_id) or str(target_user.telegram_id)
+        await message.answer(
+            f"📩 لطفاً پیام مورد نظر را برای {mention} بنویسید:",
+        )
+        await state.set_state(DirectUserMessageStates.waiting_text)
+        return
+
+
+@router.message(DirectUserMessageStates.waiting_text)
+async def send_direct_user_message(message: Message, state: FSMContext):
+    """Send the admin's message to the previously selected user."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ دسترسی محدود است.")
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    target_telegram_id = data.get("direct_target_id")
+    await state.clear()
+
+    if not target_telegram_id:
+        await message.answer("❌ اطلاعات کاربر مقصد پیدا نشد. لطفاً دوباره تلاش کنید.")
+        return
+
+    text_to_send = (
+        f"📩 پیام مستقیم از ادمین:\n\n"
+        f"{message.text}"
+    )
+    try:
+        await message.bot.send_message(target_telegram_id, text_to_send)
+    except TelegramBadRequest as exc:
+        await message.answer(f"❌ ارسال پیام ناموفق بود: {exc}")
+        return
+
+    await message.answer("✅ پیام به کاربر ارسال شد.")
 
 
 @router.message(Command("admin_broadcast"))
@@ -297,7 +512,7 @@ async def process_broadcast_message(message: Message, state: FSMContext):
 
 @router.message(BroadcastStates.waiting_rate)
 async def process_broadcast_rate(message: Message, state: FSMContext):
-    """Process broadcast rate and send messages."""
+    """Process broadcast rate and create broadcast in queue (background processor will send)."""
     if not is_admin(message.from_user.id):
         await message.answer("❌ دسترسی محدود است.")
         return
@@ -325,32 +540,15 @@ async def process_broadcast_rate(message: Message, state: FSMContext):
     # Calculate delay between messages (in seconds)
     delay_seconds = 60.0 / rate_per_minute
     
-    # Create broadcast message in database first
+    # Create broadcast message in database (background processor will handle sending)
     async for db_session in get_db():
-        # Get all users first (no limit - get ALL users)
-        users = await get_all_users(db_session, limit=None)
+        # Get user count for estimation
+        from utils.broadcast_service import BroadcastService
+        broadcast_service = BroadcastService()
+        user_stats = await broadcast_service.get_user_stats(db_session)
+        total_users = user_stats.get('active', 0)
         
-        # Create progress message with control buttons
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        progress_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="⏸ توقف موقت", callback_data=f"broadcast:pause:{0}"),
-                InlineKeyboardButton(text="🛑 لغو", callback_data=f"broadcast:cancel:{0}")
-            ]
-        ])
-        
-        progress_msg = await message.answer(
-            f"✅ شروع ارسال پیام همگانی...\n\n"
-            f"⚙️ سرعت: {rate_per_minute} پیام در دقیقه\n"
-            f"⏱ تأخیر بین پیام‌ها: {delay_seconds:.2f} ثانیه\n\n"
-            f"📊 پیشرفت: 0/{len(users)} (0%)\n"
-            f"✅ موفق: 0\n"
-            f"❌ ناموفق: 0\n\n"
-            f"⏳ در حال ارسال...",
-            reply_markup=progress_keyboard
-        )
-        
-        # Create broadcast message in database
+        # Create broadcast message in database with delay_seconds
         broadcast = await create_broadcast_message(
             db_session,
             admin_id=admin_id,
@@ -359,192 +557,27 @@ async def process_broadcast_rate(message: Message, state: FSMContext):
             message_file_id=message_file_id,
             message_caption=message_caption,
             forwarded_from_chat_id=forwarded_from_chat_id,
-            forwarded_from_message_id=forwarded_from_message_id
+            forwarded_from_message_id=forwarded_from_message_id,
+            delay_seconds=delay_seconds
         )
         
-        # Update progress message with broadcast ID
-        progress_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="⏸ توقف موقت", callback_data=f"broadcast:pause:{broadcast.id}"),
-                InlineKeyboardButton(text="🛑 لغو", callback_data=f"broadcast:cancel:{broadcast.id}")
-            ]
-        ])
-        await progress_msg.edit_reply_markup(reply_markup=progress_keyboard)
+        # Calculate estimated time
+        estimated_minutes = total_users * delay_seconds / 60
         
-        # Users already loaded above (line 325)
-        sent_count = 0
-        failed_count = 0
-        
-        from aiogram import Bot
-        import asyncio
-        bot = Bot(token=settings.BOT_TOKEN)
-        
-        # Initialize broadcast control
-        _active_broadcasts[broadcast.id] = {
-            'status': 'running',  # running, paused, cancelled
-            'pause_event': asyncio.Event(),
-            'stop_event': asyncio.Event(),
-        }
-        _active_broadcasts[broadcast.id]['pause_event'].set()  # Start as not paused
-        
-        last_update_time = asyncio.get_event_loop().time()
-        update_interval = 3  # Update progress every 3 seconds
-        
-        # Send broadcast to all users with rate limiting
-        for index, user in enumerate(users, start=1):
-            # Check if broadcast was cancelled
-            if _active_broadcasts[broadcast.id]['status'] == 'cancelled':
-                break
-            
-            # Check if broadcast is paused
-            if _active_broadcasts[broadcast.id]['status'] == 'paused':
-                await _active_broadcasts[broadcast.id]['pause_event'].wait()
-            
-            # Update progress message periodically
-            current_time = asyncio.get_event_loop().time()
-            if current_time - last_update_time >= update_interval or index == 1:
-                last_update_time = current_time
-                percent = (index / len(users)) * 100
-                status_emoji = "⏸" if _active_broadcasts[broadcast.id]['status'] == 'paused' else "⏳"
-                
-                try:
-                    await progress_msg.edit_text(
-                        f"{status_emoji} پیام همگانی در حال ارسال...\n\n"
-                        f"⚙️ سرعت: {rate_per_minute} پیام/دقیقه\n"
-                        f"⏱ تأخیر: {delay_seconds:.2f} ثانیه/پیام\n\n"
-                        f"📊 پیشرفت: {index-1}/{len(users)} ({percent:.1f}%)\n"
-                        f"✅ موفق: {sent_count}\n"
-                        f"❌ ناموفق: {failed_count}\n\n"
-                        f"⏳ در حال ارسال...",
-                        reply_markup=progress_keyboard
-                    )
-                except Exception:
-                    pass  # Ignore edit errors
-            
-
-            try:
-                # Send based on message type
-                if message_type == "forward":
-                    # Forward message
-                    if forwarded_from_chat_id and forwarded_from_message_id:
-                        sent_msg = await bot.forward_message(
-                            chat_id=user.telegram_id,
-                            from_chat_id=forwarded_from_chat_id,
-                            message_id=forwarded_from_message_id
-                        )
-                    else:
-                        # Fallback to copy if forward not possible
-                        if message_text:
-                            sent_msg = await bot.send_message(user.telegram_id, message_text)
-                        else:
-                            continue
-                elif message_type == "photo":
-                    sent_msg = await bot.send_photo(
-                        chat_id=user.telegram_id,
-                        photo=message_file_id,
-                        caption=message_caption
-                    )
-                elif message_type == "video":
-                    sent_msg = await bot.send_video(
-                        chat_id=user.telegram_id,
-                        video=message_file_id,
-                        caption=message_caption
-                    )
-                elif message_type == "document":
-                    sent_msg = await bot.send_document(
-                        chat_id=user.telegram_id,
-                        document=message_file_id,
-                        caption=message_caption
-                    )
-                elif message_type == "audio":
-                    sent_msg = await bot.send_audio(
-                        chat_id=user.telegram_id,
-                        audio=message_file_id,
-                        caption=message_caption
-                    )
-                elif message_type == "voice":
-                    sent_msg = await bot.send_voice(
-                        chat_id=user.telegram_id,
-                        voice=message_file_id,
-                        caption=message_caption
-                    )
-                elif message_type == "video_note":
-                    sent_msg = await bot.send_video_note(
-                        chat_id=user.telegram_id,
-                        video_note=message_file_id
-                    )
-                elif message_type == "sticker":
-                    sent_msg = await bot.send_sticker(
-                        chat_id=user.telegram_id,
-                        sticker=message_file_id
-                    )
-                elif message_type == "text":
-                    sent_msg = await bot.send_message(
-                        chat_id=user.telegram_id,
-                        text=message_text
-                    )
-                else:
-                    continue
-                
-                # Create receipt
-                await create_broadcast_receipt(
-                    db_session,
-                    broadcast_id=broadcast.id,
-                    user_id=user.id,
-                    telegram_message_id=sent_msg.message_id if sent_msg else None,
-                    status="sent"
-                )
-                await increment_broadcast_stats(db_session, broadcast.id, sent=True)
-                sent_count += 1
-                
-                # Rate limiting: wait between messages
-                if index < len(users):  # Don't wait after last message
-                    await asyncio.sleep(delay_seconds)
-                
-            except Exception as e:
-                # Create failed receipt
-                await create_broadcast_receipt(
-                    db_session,
-                    broadcast_id=broadcast.id,
-                    user_id=user.id,
-                    status="failed"
-                )
-                await increment_broadcast_stats(db_session, broadcast.id, failed=True)
-                failed_count += 1
-        
-        await bot.session.close()
-        
-        # Cleanup broadcast tracking
-        broadcast_status = _active_broadcasts[broadcast.id]['status']
-        del _active_broadcasts[broadcast.id]
-        
-        # Get final statistics
-        stats = await get_broadcast_statistics(db_session, broadcast.id)
-        
-        # Update final progress message
-        if broadcast_status == 'cancelled':
-            final_emoji = "🛑"
-            final_text = "لغو شد"
-        else:
-            final_emoji = "✅"
-            final_text = "تکمیل شد"
-        
-        try:
-            await progress_msg.edit_text(
-                f"{final_emoji} پیام همگانی {final_text}!\n\n"
-                f"⚙️ سرعت: {rate_per_minute} پیام/دقیقه\n"
-                f"⏱ تأخیر: {delay_seconds:.2f} ثانیه/پیام\n\n"
-                f"📊 آمار نهایی:\n"
-            f"• ارسال موفق: {sent_count}\n"
-            f"• ارسال ناموفق: {failed_count}\n"
-                f"• کل کاربران: {len(users)}\n"
-                f"• درصد موفقیت: {(sent_count/len(users)*100):.1f}%\n\n"
-            f"🔗 برای مشاهده آمار کامل:\n"
+        await message.answer(
+            f"✅ <b>پیام همگانی در صف قرار گرفت!</b>\n\n"
+            f"📋 <b>شناسه:</b> {broadcast.id}\n"
+            f"📝 <b>نوع:</b> {broadcast.message_type}\n"
+            f"⚙️ <b>سرعت:</b> {rate_per_minute} پیام/دقیقه\n"
+            f"⏱ <b>تأخیر:</b> {delay_seconds:.2f} ثانیه/پیام\n\n"
+            f"👥 <b>کاربران فعال:</b> {total_users:,}\n"
+            f"⏳ <b>زمان تقریبی:</b> {estimated_minutes:.1f} دقیقه\n\n"
+            f"📊 <b>وضعیت:</b> در انتظار پردازش\n\n"
+            f"⏳ پیام به زودی توسط سیستم پردازش و ارسال خواهد شد.\n\n"
+            f"💡 برای مشاهده وضعیت:\n"
             f"/admin_broadcast_stats {broadcast.id}",
-                reply_markup=None
+            parse_mode='HTML'
         )
-        except Exception:
-            pass
         
         await state.clear()
         break
@@ -858,7 +891,7 @@ async def confirm_queue_broadcast(callback: CallbackQuery, state: FSMContext):
             from utils.broadcast_service import BroadcastService
             broadcast_service = BroadcastService()
 
-            # Create broadcast in database
+            # Create broadcast in database (default delay ~15 msg/sec = 0.067s)
             broadcast = await broadcast_service.create_broadcast_message(
                 session=db_session,
                 admin_id=data['admin_id'],
@@ -868,6 +901,7 @@ async def confirm_queue_broadcast(callback: CallbackQuery, state: FSMContext):
                 message_caption=data.get('message_caption'),
                 forwarded_from_chat_id=data.get('forwarded_from_chat_id'),
                 forwarded_from_message_id=data.get('forwarded_from_message_id'),
+                delay_seconds=0.067,  # Default ~15 msg/sec for queue-based broadcasts
             )
 
             await callback.message.edit_text(

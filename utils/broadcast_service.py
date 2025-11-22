@@ -27,6 +27,7 @@ class BroadcastService:
         message_caption: Optional[str] = None,
         forwarded_from_chat_id: Optional[int] = None,
         forwarded_from_message_id: Optional[int] = None,
+        delay_seconds: float = 0.067,  # Default ~15 msg/sec
     ) -> BroadcastMessage:
         """ایجاد پیام همگانی جدید"""
         try:
@@ -41,11 +42,12 @@ class BroadcastService:
                 sent_count=0,
                 failed_count=0,
                 opened_count=0,
+                delay_seconds=delay_seconds,
             )
             session.add(broadcast)
             await session.commit()
             await session.refresh(broadcast)
-            logger.info(f"Broadcast message created: {broadcast.id}")
+            logger.info(f"Broadcast message created: {broadcast.id} with delay {delay_seconds}s")
             return broadcast
         except Exception as e:
             await session.rollback()

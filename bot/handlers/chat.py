@@ -11,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import StateFilter
 
 from db.database import get_db
-from db.crud import get_user_by_telegram_id, get_user_by_id, check_user_premium
+from db.crud import get_user_by_telegram_id, get_user_by_id, check_user_premium, get_system_setting_value, spend_points, get_user_points, add_points, set_system_setting
 from core.matchmaking import MatchmakingQueue
 from core.chat_manager import ChatManager
 from bot.keyboards.common import (
@@ -25,9 +25,6 @@ from config.settings import settings
 from utils.validators import get_display_name
 
 router = Router()
-
-# Track active timeout tasks to prevent duplicates
-_active_timeout_tasks: dict[int, asyncio.Task] = {}
 
 
 class ChatStates(StatesGroup):
@@ -327,32 +324,43 @@ async def add_user_to_queue_direct(
     
     user_points = await get_user_points(db_session, user.id)
     
+    success_message_count_male_str = await get_system_setting_value(db_session, 'chat_success_message_count', str(settings.CHAT_SUCCESS_MESSAGE_COUNT_MALE))
+    try:
+        required_message_count_male = int(success_message_count_male_str)
+    except (ValueError, TypeError):
+        required_message_count_male = settings.CHAT_SUCCESS_MESSAGE_COUNT_MALE
+
     # Check if user has enough coins for filtered chat
     if not user_premium and preferred_gender is not None and user_points < filtered_chat_cost:
-        from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
+        from db.crud import get_visible_coin_packages, get_visible_premium_plans
+        from bot.keyboards.coin_package import get_insufficient_coins_keyboard
+        
+        packages = await get_visible_coin_packages(db_session)
+        premium_plans = await get_visible_premium_plans(db_session)
+        
+        text = (
+            f"💡 هزینه‌ی این چت {filtered_chat_cost} سکه است؛ در صورت موفقیت چت (حداقل {required_message_count_male} پیام از پسر) ازت کسر می‌شود.\n\n"
+            f"💰 سکه فعلی تو: {user_points}\n\n"
+            f"💡 می‌تونی:\n"
+            f"🔹 سکه‌هات رو به پریمیوم تبدیل کنی\n"
+            f"🔹 یا پریمیوم بگیری (چت رایگان)\n"
+            f"🔹 یا «جستجوی شانسی» رو انتخاب کنی (رایگان)\n"
+            f"🔹 یا از پایین منو سکهٔ رایگان روزانه بگیری 👇\n"
+            f"🔹 راستی با دعوت دوستات و تکمیل پروفایل‌شون 15 تا سکه بگیری"
+        )
+
+
         try:
             await callback.message.edit_text(
-                f"⚠️ سکه کافی نداری!\n\n"
-                f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
-                f"💎 سکه فعلی تو: {user_points}\n\n"
-                f""
-                f"💡 می‌تونی:\n"
-                f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
-                f"• یا پریمیوم بگیری (چت رایگان)\n"
-                f"• یا «جستجوی شانسی» رو انتخاب کنی (رایگان)",
-                reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
+                text,
+           
+                reply_markup=get_insufficient_coins_keyboard(packages, premium_plans)
             )
         except:
             await callback.message.answer(
-                f"⚠️ سکه کافی نداری!\n\n"
-                f"💰 برای شروع چت فیلتردار به {filtered_chat_cost} سکه نیاز داری.\n"
-                f"💎 سکه فعلی تو: {user_points}\n\n"
-                f""
-                f"💡 می‌تونی:\n"
-                f"• سکه‌هات رو به پریمیوم تبدیل کنی\n"
-                f"• یا پریمیوم بگیری (چت رایگان)\n"
-                f"• یا «جستجوی شانسی» رو انتخاب کنی (رایگان)",
-                reply_markup=get_premium_rewards_menu_keyboard(is_premium=False)
+                text,
+       
+                reply_markup=get_insufficient_coins_keyboard(packages, premium_plans)
             )
         await state.clear()
         return
@@ -361,13 +369,6 @@ async def add_user_to_queue_direct(
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"DEBUG: User {user_id} adding to queue with preferred_gender: {preferred_gender}, filters: age={filter_same_age}, city={filter_same_city}, province={filter_same_province}, is_premium: {user_premium}")
-    
-    # Cancel any existing timeout task for this user before creating a new one
-    if user_id in _active_timeout_tasks:
-        existing_task = _active_timeout_tasks[user_id]
-        if not existing_task.done():
-            existing_task.cancel()
-            logger.debug(f"Cancelled existing timeout task for user {user_id}")
     
     await matchmaking_queue.add_user_to_queue(
         user_id=user_id,
@@ -395,7 +396,7 @@ async def add_user_to_queue_direct(
         elif preferred_gender is None:
             return "💰 هزینه: رایگان (شانسی)"
         elif user_points < filtered_chat_cost:
-            return f"⚠️ سکه کافی نداری ({filtered_chat_cost} سکه نیاز داری)"
+            return f"💡 هزینه این چت {filtered_chat_cost} سکه است؛ در صورت موفقیت چت، ازت کسر می‌شود"
         else:
             return f"💰 هزینه: {filtered_chat_cost} سکه"
     
@@ -447,84 +448,7 @@ async def add_user_to_queue_direct(
         
         await state.clear()
         
-    # Cancel any existing timeout task for this user
-    if user_id in _active_timeout_tasks:
-        existing_task = _active_timeout_tasks[user_id]
-        if not existing_task.done():
-            existing_task.cancel()
-            logger.debug(f"Cancelled existing timeout task for user {user_id}")
-    
-    # Create new timeout task
-    # Determine which type of virtual profile (if any) to create
-    # 1. Boy + Explicit Female: Virtual FEMALE profile
-    # 2. Boy + Random Search: Virtual MALE profile (if no real boys available)
-    # 3. Boy + Explicit Male: Virtual MALE profile (priority 3)
-    
-    is_boy_searching_girl = (
-        user.gender == "male" and 
-        preferred_gender == "female"  # Explicit female preference
-    )
-    
-    is_boy_searching_boy = (
-        user.gender == "male" and 
-        preferred_gender == "male"  # Explicit male preference
-    )
-    
-    is_boy_random_search = (
-        user.gender == "male" and
-        preferred_gender is None  # Random search
-    )
-    
-    if is_boy_searching_girl:
-        # Boy searching for girl explicitly -> create virtual FEMALE after timeout
-        import random
-        timeout_seconds = random.randint(
-            settings.VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS,
-            settings.VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS
-        )
-        timeout_task = asyncio.create_task(check_matchmaking_timeout_with_virtual(
-            user_id, user.telegram_id, user.id, user.age, user.city, user.province, 
-            preferred_gender, timeout_seconds, virtual_gender="female",
-            filter_same_age=filter_same_age, filter_same_city=filter_same_city, 
-            filter_same_province=filter_same_province
-        ))
-    elif is_boy_searching_boy:
-        # Boy searching for boy explicitly -> create virtual MALE after timeout (priority 3)
-        import random
-        timeout_seconds = random.randint(
-            settings.VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS,
-            settings.VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS
-        )
-        timeout_task = asyncio.create_task(check_matchmaking_timeout_with_virtual(
-            user_id, user.telegram_id, user.id, user.age, user.city, user.province,
-            preferred_gender, timeout_seconds, virtual_gender="male",
-            filter_same_age=filter_same_age, filter_same_city=filter_same_city, 
-            filter_same_province=filter_same_province
-        ))
-    elif is_boy_random_search:
-        # Boy random search (no preferred gender) -> create virtual MALE if no real boys
-        import random
-        timeout_seconds = random.randint(
-            settings.VIRTUAL_PROFILE_TIMEOUT_MIN_SECONDS,
-            settings.VIRTUAL_PROFILE_TIMEOUT_MAX_SECONDS
-        )
-        timeout_task = asyncio.create_task(check_matchmaking_timeout_with_virtual(
-            user_id, user.telegram_id, user.id, user.age, user.city, user.province,
-            preferred_gender, timeout_seconds, virtual_gender="male",
-            filter_same_age=filter_same_age, filter_same_city=filter_same_city, 
-            filter_same_province=filter_same_province
-        ))
-    else:
-        # Normal 120 seconds timeout (for girls or other cases)
-        timeout_task = asyncio.create_task(check_matchmaking_timeout(user_id, user.telegram_id))
-    
-    _active_timeout_tasks[user_id] = timeout_task
-    
-    # Clean up task from dict when done
-    def cleanup_task(task):
-        if user_id in _active_timeout_tasks:
-            del _active_timeout_tasks[user_id]
-    timeout_task.add_done_callback(cleanup_task)
+    return
 
 
 async def check_matchmaking_timeout_with_virtual(
@@ -759,7 +683,7 @@ async def check_matchmaking_timeout_with_virtual(
                             if coins_deducted:
                                 return f"💰 {cost} سکه کسر شد (باقی‌مانده: {points})"
                             else:
-                                return f"⚠️ سکه کافی نداشتی ({cost} سکه نیاز داری)"
+                                return f"💡 هزینه این چت {cost} سکه است؛ در صورت موفقیت چت ازت کسر می‌شود"
                     
                     # Send notification to user that they are connected (exactly like real match)
                     bot = Bot(token=settings.BOT_TOKEN)
@@ -1081,40 +1005,6 @@ async def try_find_match(telegram_id: int, db_session):
                     user_coins_deducted = False
                     matched_user_coins_deducted = False
                     
-                    # Check if user selected specific gender (not "all")
-                    if not user_premium and user_pref_gender is not None and user_pref_gender in ["male", "female"]:
-                        # Check if user has enough coins
-                        if user_points >= chat_cost:
-                            success = await spend_points(
-                                db_session,
-                                user.id,
-                                chat_cost,
-                                "spent",
-                                "chat_start",
-                                f"Cost for starting chat (will be refunded if chat unsuccessful)"
-                            )
-                            if success:
-                                user_coins_deducted = True
-                                await chat_manager.set_chat_cost_deducted(chat_room.id, user.id, True)
-                                user_points -= chat_cost
-                    
-                    # Check if matched_user selected specific gender (not "all")
-                    if not matched_user_premium and matched_user_pref_gender is not None and matched_user_pref_gender in ["male", "female"]:
-                        # Check if user has enough coins
-                        if matched_user_points >= chat_cost:
-                            success = await spend_points(
-                                db_session,
-                                matched_user.id,
-                                chat_cost,
-                                "spent",
-                                "chat_start",
-                                f"Cost for starting chat (will be refunded if chat unsuccessful)"
-                            )
-                            if success:
-                                matched_user_coins_deducted = True
-                                await chat_manager.set_chat_cost_deducted(chat_room.id, matched_user.id, True)
-                                matched_user_points -= chat_cost
-                    
                     # Helper function to generate cost summary for match found
                     def get_match_cost_summary(is_premium, pref_gender, coins_deducted, chat_cost, points):
                         if is_premium:
@@ -1124,7 +1014,7 @@ async def try_find_match(telegram_id: int, db_session):
                         elif coins_deducted:
                             return f"💰 {chat_cost} سکه کسر شد (باقی‌مانده: {points})"
                         else:
-                            return f"⚠️ سکه کافی نداشتی ({chat_cost} سکه نیاز داری)"
+                            return f"💡 هزینه این چت {chat_cost} سکه است؛ در صورت موفقیت چت ازت کسر می‌شود"
                     
                     # Prepare messages with beautiful UI
                     user_cost_summary = get_match_cost_summary(
@@ -1255,7 +1145,7 @@ async def end_chat_confirm(callback: CallbackQuery):
             
             # Get message counts for both users
             user1_count, user2_count = message_counts
-            
+
             # Determine which user is which
             if chat_room.user1_id == user.id:
                 current_user_count = user1_count
@@ -1263,12 +1153,22 @@ async def end_chat_confirm(callback: CallbackQuery):
             else:
                 current_user_count = user2_count
                 partner_user_count = user1_count
-            
+
+            # Determine male vs female message counts
+            if user.gender == "male":
+                male_messages = current_user_count
+                female_messages = partner_user_count
+                male_id = user.id
+                female_id = partner_id
+            else:
+                male_messages = partner_user_count
+                female_messages = current_user_count
+                male_id = partner_id
+                female_id = user.id
+
             # Check if any messages were sent
             total_messages = current_user_count + partner_user_count
-            
-            # Note: We will send summary to both users below, so no need to send "chat ended" message here
-            
+
             # Notify all users who requested notification for this user's chat end
             if partner:
                 from db.crud import get_chat_end_notifications_for_user
@@ -1334,19 +1234,41 @@ async def end_chat_confirm(callback: CallbackQuery):
                     except Exception:
                         pass
             
-            # Get required message count from system settings
+            # Get required message counts from system settings
             from db.crud import get_system_setting_value
-            required_message_count_str = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
+            required_message_count_male_str = await get_system_setting_value(
+                db_session,
+                'chat_success_message_count',
+                str(settings.CHAT_SUCCESS_MESSAGE_COUNT_MALE)
+            )
             try:
-                required_message_count = int(required_message_count_str)
+                required_message_count_male = int(required_message_count_male_str)
             except (ValueError, TypeError):
-                required_message_count = 2
-            
-            # Check if chat was successful (both users sent at least required_message_count messages)
-            chat_successful = current_user_count >= required_message_count and partner_user_count >= required_message_count
-            
-            # Check if coins were deducted and need refund for both users
-            from db.crud import check_user_premium, get_user_points, add_points, get_system_setting_value
+                required_message_count_male = settings.CHAT_SUCCESS_MESSAGE_COUNT_MALE
+
+            required_message_count_female_str = await get_system_setting_value(
+                db_session,
+                'chat_success_message_count_female',
+                str(settings.CHAT_SUCCESS_MESSAGE_COUNT_FEMALE)
+            )
+            try:
+                required_message_count_female = int(required_message_count_female_str)
+            except (ValueError, TypeError):
+                required_message_count_female = settings.CHAT_SUCCESS_MESSAGE_COUNT_FEMALE
+
+            # Check if chat was successful for male and female separately
+            chat_successful_male = (
+                male_messages >= required_message_count_male
+                and female_messages >= required_message_count_male
+            )
+            chat_successful_female = (
+                female_id is not None
+                and female_messages >= required_message_count_female
+                and male_messages >= required_message_count_female
+            )
+
+            # Get filtered chat cost to deduct only if chat is successful
+            from db.crud import check_user_premium, get_user_points, add_points, get_system_setting_value, spend_points
             from core.points_manager import PointsManager
             from aiogram import Bot
             
@@ -1357,22 +1279,62 @@ async def end_chat_confirm(callback: CallbackQuery):
             user_pref_gender = await chat_manager.get_user_preferred_gender(chat_room.id, user.id)
             partner_pref_gender = await chat_manager.get_user_preferred_gender(chat_room.id, partner_id) if partner_id else None
             
+            # Get chat cost
+            filtered_chat_cost_str = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
+            try:
+                chat_cost = int(filtered_chat_cost_str)
+            except (ValueError, TypeError):
+                chat_cost = 1
+
+            # Deduct coins now that chat success is confirmed
+            if chat_successful_male:
+                user_can_be_charged = (
+                    not user_premium and user_pref_gender is not None and user.gender == "male"
+                )
+                partner_can_be_charged = (
+                    partner_id
+                    and partner
+                    and not partner_premium
+                    and partner_pref_gender is not None
+                    and partner.gender == "male"
+                )
+
+                if user_can_be_charged:
+                    user_balance = await get_user_points(db_session, user.id)
+                    if user_balance >= chat_cost:
+                        success = await spend_points(
+                            db_session,
+                            user.id,
+                            chat_cost,
+                            "spent",
+                            "filtered_chat",
+                            "Filtered chat cost after success"
+                        )
+                        if success:
+                            await chat_manager.set_chat_cost_deducted(chat_room.id, user.id, True)
+                if partner_can_be_charged:
+                    partner_balance = await get_user_points(db_session, partner_id)
+                    if partner_balance >= chat_cost:
+                        success = await spend_points(
+                            db_session,
+                            partner_id,
+                            chat_cost,
+                            "spent",
+                            "filtered_chat",
+                            "Filtered chat cost after success"
+                        )
+                        if success:
+                            await chat_manager.set_chat_cost_deducted(chat_room.id, partner_id, True)
+
             # Check if coins were deducted for both users
             user_was_cost_deducted = await chat_manager.was_chat_cost_deducted(chat_room.id, user.id)
             partner_was_cost_deducted = await chat_manager.was_chat_cost_deducted(chat_room.id, partner_id) if partner_id else False
-            
-            # Get chat cost
-            chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
-            try:
-                chat_cost = int(chat_cost_str)
-            except (ValueError, TypeError):
-                chat_cost = 3
             
             # Refund coins if chat was not successful and coins were deducted
             user_coins_refunded = False
             partner_coins_refunded = False
             
-            if not user_premium and user_was_cost_deducted and not chat_successful:
+            if not user_premium and user_was_cost_deducted and not chat_successful_male:
                 # Refund coins for user
                 success = await add_points(
                     db_session,
@@ -1385,7 +1347,7 @@ async def end_chat_confirm(callback: CallbackQuery):
                 if success:
                     user_coins_refunded = True
             
-            if partner_id and not partner_premium and partner_was_cost_deducted and not chat_successful:
+            if partner_id and not partner_premium and partner_was_cost_deducted and not chat_successful_male:
                 # Refund coins for partner
                 success = await add_points(
                     db_session,
@@ -1532,13 +1494,53 @@ async def end_chat_confirm(callback: CallbackQuery):
             # Don't delete messages automatically - user can request deletion via button
             # Message IDs are stored in Redis and will be available for deletion request
             
-            # Award coins for successful chat - DISABLED (removed as per user request)
-            # if chat_successful and partner_id:
-            #     from core.points_manager import PointsManager
-            #     await PointsManager.award_chat_success(user.id, partner_id)
+            # Award coins for successful chat
+            if chat_successful_female:
+                from db.crud import get_coins_for_activity
+                from core.event_engine import EventEngine
+                from aiogram import Bot as RewardBot
+                from core.points_manager import PointsManager as RewardPointsManager
+
+                coins_base = await get_coins_for_activity(db_session, "chat_success")
+                if coins_base is None:
+                    coins_base = settings.POINTS_CHAT_SUCCESS
+
+                if coins_base and coins_base > 0:
+                    reward_users = []
+                    if user.gender == "female":
+                        reward_users.append(user)
+                    if partner and partner.gender == "female":
+                        reward_users.append(partner)
+
+                    if reward_users:
+                        reward_bot = RewardBot(token=settings.BOT_TOKEN)
+                        try:
+                            for target in reward_users:
+                                actual_coins = await EventEngine.apply_points_multiplier(
+                                    target.id,
+                                    coins_base,
+                                    "chat_success"
+                                )
+                                await RewardPointsManager.award_points(
+                                    target.id,
+                                    coins_base,
+                                    "chat_success",
+                                    "پاداش چت موفق برای دختران"
+                                )
+                                try:
+                                    await reward_bot.send_message(
+                                        target.telegram_id,
+                                        f"🎉 چت موفقیت‌آمیز بود!\n\n"
+                                        f"💰 {int(actual_coins)} سکه به حسابت اضافه شد!\n"
+                                        f"💡 میتونی سکه هات رو به پریمیوم تبدیل کنی ، با دوستات بازی کنی یا برای چت اختصاصی با دخترا و پسرای باحال استفاده کنی"
+                                    )
+                                except Exception:
+                                    pass
+                        finally:
+                            await reward_bot.session.close()
             
             # Check and award badges for chat achievements
-            if chat_successful:
+            if chat_successful_male:
                 from core.achievement_system import AchievementSystem
                 from core.badge_manager import BadgeManager
                 from db.crud import get_user_chat_count, get_badge_by_key
@@ -1814,11 +1816,11 @@ async def request_video_call(callback: CallbackQuery):
                     f"❌ شما عضویت ویژه ندارید.\n\n"
                     f"💎 اشتراک پریمیوم\n\n"
                     f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n"
-                    f"• تماس تصویری\n"
-                    f"• تماس صوتی\n"
-                    f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
-                    f"• فیلترهای پیشرفته\n"
-                    f"• اولویت در صف (نفر اول صف)\n\n"
+                    f"🔹 تماس تصویری\n"
+                    f"🔹 تماس صوتی\n"
+                    f"🔹 زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
+                    f"🔹 فیلترهای پیشرفته\n"
+                    f"🔹 اولویت در صف (نفر اول صف)\n\n"
                     f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
                     f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
                     f"آیا می‌خواهید پریمیوم بخرید?",
@@ -1829,11 +1831,11 @@ async def request_video_call(callback: CallbackQuery):
                     f"❌ شما عضویت ویژه ندارید.\n\n"
                     f"💎 اشتراک پریمیوم\n\n"
                     f"با خرید پریمیوم از امکانات زیر بهره‌مند شوید:\n"
-                    f"• تماس تصویری\n"
-                    f"• تماس صوتی\n"
-                    f"• زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
-                    f"• فیلترهای پیشرفته\n"
-                    f"• اولویت در صف (نفر اول صف)\n\n"
+                    f"🔹 تماس تصویری\n"
+                    f"🔹 تماس صوتی\n"
+                    f"🔹 زمان چت بیشتر ({settings.PREMIUM_CHAT_DURATION_MINUTES} دقیقه در مقابل {settings.MAX_CHAT_DURATION_MINUTES} دقیقه)\n"
+                    f"🔹 فیلترهای پیشرفته\n"
+                    f"🔹 اولویت در صف (نفر اول صف)\n\n"
                     f"قیمت: {settings.PREMIUM_PRICE} تومان\n"
                     f"مدت زمان: {settings.PREMIUM_DURATION_DAYS} روز\n\n"
                     f"آیا می‌خواهید پریمیوم بخرید?",
@@ -1928,5 +1930,66 @@ async def cancel_search(callback: CallbackQuery, state: FSMContext):
         
         await callback.answer("✅ جستجو لغو شد")
         await state.clear()
+        break
+
+
+@router.callback_query(F.data == "chat:insufficient_coins")
+async def insufficient_coins_back(callback: CallbackQuery):
+    """Handle back navigation to insufficient coins menu."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import get_user_by_telegram_id, get_visible_coin_packages, get_visible_premium_plans
+        from bot.keyboards.coin_package import get_insufficient_coins_keyboard
+        from core.points_manager import PointsManager
+        from config.settings import settings
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        user_points = await PointsManager.get_balance(user.id)
+        
+        # Get filtered chat cost
+        filtered_chat_cost_str = await get_system_setting_value(db_session, "filtered_chat_cost")
+        try:
+            filtered_chat_cost = int(filtered_chat_cost_str) if filtered_chat_cost_str else settings.FILTERED_CHAT_COST
+        except (ValueError, TypeError):
+            filtered_chat_cost = settings.FILTERED_CHAT_COST
+        
+        # Get required message count for males
+        required_message_count_male_str = await get_system_setting_value(db_session, "chat_success_message_count_male")
+        try:
+            required_message_count_male = int(required_message_count_male_str) if required_message_count_male_str else settings.CHAT_SUCCESS_MESSAGE_COUNT_MALE
+        except (ValueError, TypeError):
+            required_message_count_male = settings.CHAT_SUCCESS_MESSAGE_COUNT_MALE
+        
+        packages = await get_visible_coin_packages(db_session)
+        premium_plans = await get_visible_premium_plans(db_session)
+        
+        text = (
+            f"💡 هزینه‌ی این چت {filtered_chat_cost} سکه است؛ در صورت موفقیت چت (حداقل {required_message_count_male} پیام از پسر) ازت کسر می‌شود.\n\n"
+            f"💰 سکه فعلی تو: {user_points}\n\n"
+            f"💡 می‌تونی:\n"
+            f"🔹 سکه‌هات رو به پریمیوم تبدیل کنی\n"
+            f"🔹 یا پریمیوم بگیری (چت رایگان)\n"
+            f"🔹 یا «جستجوی شانسی» رو انتخاب کنی (رایگان)\n"
+            f"🔹 یا از پایین منو سکهٔ رایگان روزانه بگیری 👇\n"
+            f"🔹 راستی با دعوت دوستات و تکمیل پروفایل‌شون 15 تا سکه بگیری"
+        )
+        
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=get_insufficient_coins_keyboard(packages, premium_plans)
+            )
+        except:
+            await callback.message.answer(
+                text,
+                reply_markup=get_insufficient_coins_keyboard(packages, premium_plans)
+            )
+        
+        await callback.answer()
         break
 

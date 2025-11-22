@@ -98,7 +98,7 @@ def get_user_premium_plans_keyboard(plans: list) -> InlineKeyboardMarkup:
         ])
     
     keyboard.append([
-        InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:menu"),
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -143,7 +143,7 @@ def get_premium_plan_payment_keyboard(plan) -> InlineKeyboardMarkup:
         ])
     
     keyboard.append([
-        InlineKeyboardButton(text="🔙 بازگشت", callback_data="premium:info"),
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data="chat:insufficient_coins"),
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

@@ -9,12 +9,12 @@ from sqlalchemy import select, update, delete, and_, or_, func
 from sqlalchemy.orm import joinedload
 
 from db.models import (
-    User, ChatRoom, PremiumSubscription, Report, Like, Follow, Block, DirectMessage, ChatEndNotification,
-    UserPoints, PointsHistory, DailyReward, UserReferralCode, Referral, Badge, UserBadge,
+    User, ChatRoom, PremiumSubscription, Report, Like, Follow, Block, DirectMessage, ChatEndNotification,                                                       
+    UserPoints, PointsHistory, DailyReward, UserReferralCode, Referral, Badge, UserBadge,                                                                       
     Achievement, UserAchievement, WeeklyChallenge, UserChallenge,
-    AdminReferralLink, AdminReferralLinkClick, AdminReferralLinkSignup, CoinSetting,
-    BroadcastMessage, BroadcastMessageReceipt,
-    Event, EventParticipant, EventReward, PremiumPlan, CoinRewardSetting, MandatoryChannel
+    AdminReferralLink, AdminReferralLinkClick, AdminReferralLinkSignup, CoinSetting,                                                                            
+    BroadcastMessage, BroadcastMessageReceipt, CoinPackage, PaymentTransaction,
+    Event, EventParticipant, EventReward, PremiumPlan, CoinRewardSetting, MandatoryChannel                                                                      
 )
 from config.settings import settings
 
@@ -2434,7 +2434,8 @@ async def create_broadcast_message(
     message_file_id: Optional[str] = None,
     message_caption: Optional[str] = None,
     forwarded_from_chat_id: Optional[int] = None,
-    forwarded_from_message_id: Optional[int] = None
+    forwarded_from_message_id: Optional[int] = None,
+    delay_seconds: float = 0.067  # Default ~15 msg/sec
 ) -> BroadcastMessage:
     """Create a new broadcast message."""
     broadcast = BroadcastMessage(
@@ -2444,7 +2445,8 @@ async def create_broadcast_message(
         message_file_id=message_file_id,
         message_caption=message_caption,
         forwarded_from_chat_id=forwarded_from_chat_id,
-        forwarded_from_message_id=forwarded_from_message_id
+        forwarded_from_message_id=forwarded_from_message_id,
+        delay_seconds=delay_seconds
     )
     session.add(broadcast)
     await session.commit()
@@ -3550,18 +3552,20 @@ async def create_payment_transaction(
     gateway: str = "zarinpal",
     currency: str = "IRT",
     callback_url: Optional[str] = None,
-    return_url: Optional[str] = None
+    return_url: Optional[str] = None,
+    coin_package_id: Optional[int] = None
 ) -> "PaymentTransaction":
     """Create a new payment transaction."""
     from db.models import PaymentTransaction
     import uuid
     
     # Generate unique transaction ID
-    transaction_id = f"txn_{user_id}_{plan_id or 0}_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
+    transaction_id = f"txn_{user_id}_{plan_id or coin_package_id or 0}_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
     
     transaction = PaymentTransaction(
         user_id=user_id,
         plan_id=plan_id,
+        coin_package_id=coin_package_id,
         transaction_id=transaction_id,
         amount=amount,
         currency=currency,
@@ -3793,5 +3797,233 @@ async def get_active_mandatory_channels(session: AsyncSession) -> List[Mandatory
         .order_by(MandatoryChannel.order_index.asc(), MandatoryChannel.id.asc())
     )
     return list(result.scalars().all())
+
+
+# ============= Coin Package CRUD =============
+
+async def create_coin_package(
+    session: AsyncSession,
+    package_name: str,
+    coin_amount: int,
+    price: float,
+    original_price: Optional[float] = None,
+    discount_percent: int = 0,
+    stars_required: Optional[int] = None,
+    payment_methods_json: Optional[str] = None,
+    discount_start_date: Optional[datetime] = None,
+    discount_end_date: Optional[datetime] = None,
+    is_active: bool = True,
+    is_visible: bool = True,
+    display_order: int = 0
+) -> CoinPackage:
+    """Create a new coin package."""
+    # Set default payment method if not provided
+    if payment_methods_json is None:
+        payment_methods_json = '["shaparak"]'
+    
+    package = CoinPackage(
+        package_name=package_name,
+        coin_amount=coin_amount,
+        price=price,
+        original_price=original_price,
+        discount_percent=discount_percent,
+        stars_required=stars_required,
+        payment_methods_json=payment_methods_json,
+        discount_start_date=discount_start_date,
+        discount_end_date=discount_end_date,
+        is_active=is_active,
+        is_visible=is_visible,
+        display_order=display_order
+    )
+    session.add(package)
+    await session.commit()
+    await session.refresh(package)
+    return package
+
+
+async def get_coin_package_by_id(session: AsyncSession, package_id: int) -> Optional[CoinPackage]:
+    """Get coin package by ID."""
+    result = await session.execute(select(CoinPackage).where(CoinPackage.id == package_id))
+    return result.scalar_one_or_none()
+
+
+async def get_all_coin_packages(
+    session: AsyncSession,
+    active_only: bool = False,
+    visible_only: bool = False
+) -> List[CoinPackage]:
+    """Get all coin packages."""
+    query = select(CoinPackage).order_by(CoinPackage.display_order.asc(), CoinPackage.coin_amount.asc())
+    
+    if active_only:
+        query = query.where(CoinPackage.is_active == True)
+    
+    if visible_only:
+        query = query.where(CoinPackage.is_visible == True)
+    
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_visible_coin_packages(session: AsyncSession) -> List[CoinPackage]:
+    """Get visible and active coin packages for users."""
+    result = await session.execute(
+        select(CoinPackage)
+        .where(CoinPackage.is_active == True, CoinPackage.is_visible == True)
+        .order_by(CoinPackage.display_order.asc(), CoinPackage.coin_amount.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def update_coin_package(
+    session: AsyncSession,
+    package_id: int,
+    package_name: Optional[str] = None,
+    coin_amount: Optional[int] = None,
+    price: Optional[float] = None,
+    original_price: Optional[float] = None,
+    discount_percent: Optional[int] = None,
+    stars_required: Optional[int] = None,
+    payment_methods_json: Optional[str] = None,
+    discount_start_date: Optional[datetime] = None,
+    discount_end_date: Optional[datetime] = None,
+    is_active: Optional[bool] = None,
+    is_visible: Optional[bool] = None,
+    display_order: Optional[int] = None
+) -> Optional[CoinPackage]:
+    """Update coin package."""
+    package = await get_coin_package_by_id(session, package_id)
+    
+    if not package:
+        return None
+    
+    if package_name is not None:
+        package.package_name = package_name
+    if coin_amount is not None:
+        package.coin_amount = coin_amount
+    if price is not None:
+        package.price = price
+    if original_price is not None:
+        package.original_price = original_price
+    if discount_percent is not None:
+        package.discount_percent = discount_percent
+    if stars_required is not None:
+        package.stars_required = stars_required
+    if payment_methods_json is not None:
+        package.payment_methods_json = payment_methods_json
+    if discount_start_date is not None:
+        package.discount_start_date = discount_start_date
+    if discount_end_date is not None:
+        package.discount_end_date = discount_end_date
+    if is_active is not None:
+        package.is_active = is_active
+    if is_visible is not None:
+        package.is_visible = is_visible
+    if display_order is not None:
+        package.display_order = display_order
+    
+    await session.commit()
+    await session.refresh(package)
+    return package
+
+
+async def delete_coin_package(session: AsyncSession, package_id: int) -> bool:
+    """Delete coin package."""
+    package = await get_coin_package_by_id(session, package_id)
+    
+    if not package:
+        return False
+    
+    await session.delete(package)
+    await session.commit()
+    return True
+
+
+async def get_user_gender_counts(session: AsyncSession) -> dict[str, int]:
+    """Return counts of users grouped by gender."""
+    stmt = (
+        select(User.gender, func.count(User.id))
+        .where(
+            User.is_active == True,
+            User.is_banned == False
+        )
+        .group_by(User.gender)
+    )
+    result = await session.execute(stmt)
+    return {row[0] or "نامشخص": row[1] for row in result.all()}
+
+
+async def get_new_user_count(session: AsyncSession, since: datetime) -> int:
+    """Count users created since the provided datetime."""
+    if not since:
+        return 0
+    stmt = select(func.count(User.id)).where(User.created_at >= since, User.is_active == True)
+    result = await session.execute(stmt)
+    return result.scalar() or 0
+
+
+async def get_referral_count(session: AsyncSession, since: Optional[datetime] = None) -> int:
+    """Count referrals optionally filtered by time."""
+    stmt = select(func.count(Referral.id))
+    if since:
+        stmt = stmt.where(Referral.created_at >= since)
+    result = await session.execute(stmt)
+    return result.scalar() or 0
+
+
+async def get_daily_reward_count(
+    session: AsyncSession,
+    since: Optional[datetime] = None
+) -> int:
+    """Count daily rewards optionally filtered by time."""
+    stmt = select(func.count(DailyReward.id))
+    if since:
+        stmt = stmt.where(DailyReward.created_at >= since)
+    result = await session.execute(stmt)
+    return result.scalar() or 0
+
+
+async def get_payment_summary(
+    session: AsyncSession,
+    since: Optional[datetime] = None,
+    plan_only: bool = False,
+    coin_only: bool = False
+) -> tuple[int, float]:
+    """Summarize payment transactions as count and amount."""
+    filters = [
+        or_(
+            PaymentTransaction.status == "completed",
+            PaymentTransaction.status == "success",
+            PaymentTransaction.payment_status.in_(["success", "completed"])
+        )
+    ]
+    if since:
+        filters.append(PaymentTransaction.created_at >= since)
+    if plan_only:
+        filters.append(PaymentTransaction.plan_id.isnot(None))
+    if coin_only:
+        filters.append(PaymentTransaction.coin_package_id.isnot(None))
+    stmt = (
+        select(
+            func.count(PaymentTransaction.id),
+            func.coalesce(func.sum(PaymentTransaction.amount), 0.0)
+        )
+        .where(*filters)
+    )
+    result = await session.execute(stmt)
+    count, total = result.one()
+    return int(count or 0), float(total or 0.0)
+
+
+async def get_chat_summary(session: AsyncSession) -> dict[str, int]:
+    """Return counts for active and ended chats."""
+    active_stmt = select(func.count(ChatRoom.id)).where(ChatRoom.is_active == True)
+    ended_stmt = select(func.count(ChatRoom.id)).where(ChatRoom.ended_at.isnot(None))
+    active = await session.execute(active_stmt)
+    ended = await session.execute(ended_stmt)
+    return {
+        "active": active.scalar() or 0,
+        "ended": ended.scalar() or 0,
+    }
 
 

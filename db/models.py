@@ -757,6 +757,7 @@ class BroadcastMessage(Base):
     sent_count = Column(Integer, default=0, nullable=False)
     failed_count = Column(Integer, default=0, nullable=False)
     opened_count = Column(Integer, default=0, nullable=False)
+    delay_seconds = Column(Float, default=0.067, nullable=False)  # Delay between messages in seconds (default ~15 msg/sec)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     
     # Relationships
@@ -959,6 +960,48 @@ class PremiumPlan(Base):
         return f"<PremiumPlan(id={self.id}, plan_name={self.plan_name}, duration_days={self.duration_days}, price={self.price})>"
 
 
+class CoinPackage(Base):
+    """Coin package model for managing coin purchase packages."""
+    __tablename__ = "coin_packages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    package_name = Column(String(200), nullable=False)  # e.g., "100 سکه", "500 سکه", "1000 سکه"
+    coin_amount = Column(Integer, nullable=False, index=True)  # Number of coins in package
+    price = Column(Float, nullable=False)  # Price in Toman
+    original_price = Column(Float, nullable=True)  # Original price before discount
+    discount_percent = Column(Integer, default=0, nullable=False)  # Discount percentage (0-100)
+    
+    # Stars payment
+    stars_required = Column(Integer, nullable=True)  # Stars required for payment (null if not available)
+    
+    # Payment methods (JSON: ["shaparak", "stars"] or ["shaparak"] or ["stars"])
+    payment_methods_json = Column(Text, nullable=True)  # JSON array of payment methods
+    
+    # Discount period (optional - for limited time offers)
+    discount_start_date = Column(DateTime, nullable=True)
+    discount_end_date = Column(DateTime, nullable=True)
+    
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_visible = Column(Boolean, default=True, nullable=False)  # Show to users
+    
+    # Display order
+    display_order = Column(Integer, default=0, nullable=False, index=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index('idx_coin_amount', 'coin_amount'),
+        Index('idx_coin_is_active', 'is_active'),
+        Index('idx_coin_display_order', 'display_order'),
+    )
+    
+    def __repr__(self):
+        return f"<CoinPackage(id={self.id}, package_name={self.package_name}, coin_amount={self.coin_amount}, price={self.price})>"
+
+
 class PaymentTransaction(Base):
     """Payment transaction model for tracking payment gateway transactions."""
     __tablename__ = "payment_transactions"
@@ -966,6 +1009,7 @@ class PaymentTransaction(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     plan_id = Column(Integer, ForeignKey("premium_plans.id"), nullable=True, index=True)
+    coin_package_id = Column(Integer, ForeignKey("coin_packages.id"), nullable=True, index=True)  # For coin purchases
     
     # Transaction details
     transaction_id = Column(String(255), unique=True, nullable=False, index=True)  # Unique transaction ID

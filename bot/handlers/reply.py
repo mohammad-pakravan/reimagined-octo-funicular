@@ -9,9 +9,15 @@ from db.database import get_db
 from db.crud import get_user_by_telegram_id
 from bot.keyboards.reply import get_main_reply_keyboard, get_chat_reply_keyboard
 from bot.keyboards.common import get_chat_keyboard, get_preferred_gender_keyboard
+from bot.keyboards.engagement import (
+    get_points_menu_keyboard,
+    get_engagement_menu_keyboard,
+    get_coins_menu_keyboard,
+)
 from core.chat_manager import ChatManager
 from config.settings import settings
 from utils.validators import get_display_name
+from bot.handlers.points import build_points_info_text
 
 router = Router()
 
@@ -114,6 +120,11 @@ async def my_profile_button(message: Message):
             user_badges_display = await BadgeManager.get_user_badges_display(user.id, limit=5)
             
             from utils.validators import get_display_name
+            from db.crud import check_user_premium
+            
+            is_premium = await check_user_premium(db_session, user.id)
+            premium_status = "✅ فعال" if is_premium else "❌ غیرفعال"
+            
             profile_text = (
                 f"📊 پروفایل من\n\n"
                 f"• نام: {get_display_name(user)}\n"
@@ -121,8 +132,13 @@ async def my_profile_button(message: Message):
                 f"• استان: {user.province or 'تعیین نشده'}\n"
                 f"• شهر: {user.city or 'تعیین نشده'}\n"
                 f"• سن: {user.age or 'تعیین نشده'}\n"
-                f"• پریمیوم: {'✅ فعال' if user.is_premium else '❌ غیرفعال'}\n"
+                f"• پریمیوم: {premium_status}\n"
             )
+            
+            if is_premium and user.premium_expires_at:
+                from datetime import datetime
+                expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M")
+                profile_text += f"• انقضای پریمیوم: {expires_at}\n"
             
             # Add badges if available
             if user_badges_display:
@@ -182,7 +198,7 @@ async def premium_button(message: Message):
                 f"• چت نامحدود بدون سکه و رایگان\n"
                 f"• درخواست تماس  نامحدود و رایگان\n"
                 f"• پیام دایرکت  نامحدود و رایگان\n"
-                f"• فیلترهای پیشرفته ( به زودی )\n"
+                f"• فیلترهای پیشرفته  \n"
                 f"• اولویت در صف (نفر اول صف)"
             )
         else:
@@ -196,7 +212,7 @@ async def premium_button(message: Message):
                 text += "• چت نامحدود بدون سکه و رایگان\n"
                 text += "• درخواست تماس  نامحدود و رایگان\n"
                 text += "• پیام دایرکت  نامحدود و رایگان\n"
-                text += "• فیلترهای پیشرفته ( به زودی )\n"
+                text += "• فیلترهای پیشرفته   \n"
                 text += "• اولویت در صف (نفر اول صف)\n\n"
                 text += "🎁 پلن‌های موجود:\n\n"
                 
@@ -740,84 +756,43 @@ async def anonymous_voice_call_button(message: Message):
         break
 
 
-@router.message(F.text == "🎁 پاداش‌ها و تعامل")
-async def engagement_button(message: Message):
-    """Handle 'Engagement' reply button."""
+@router.message(F.text == "🎁 سکه رایگان")
+async def free_coins_button(message: Message):
+    """Handle 'Free Coins' reply button."""
     user_id = message.from_user.id
     
     async for db_session in get_db():
         from db.crud import get_user_by_telegram_id, check_user_premium
         from core.points_manager import PointsManager
-        from bot.keyboards.engagement import get_premium_rewards_menu_keyboard
-        from config.settings import settings
+        from bot.keyboards.engagement import get_engagement_menu_keyboard
         
         user = await get_user_by_telegram_id(db_session, user_id)
         if not user:
             await message.answer("❌ پروفایل شما یافت نشد. لطفاً /start را بزنید.")
             break
         
-        is_premium = await check_user_premium(db_session, user.id)
         points = await PointsManager.get_balance(user.id)
+        is_premium = await check_user_premium(db_session, user.id)
         
-        # Get user medals
-        from core.badge_manager import BadgeManager
-        user_badges = await BadgeManager.get_user_badges_list(user.id, limit=5)
-        medals_count = len(await BadgeManager.get_user_badges_list(user.id))
+        text = f"🎁 سکه رایگان\n\n💰 سکه‌های فعلی شما: {points}\n"
         
-        # Format medals display
-        medals_display = ""
-        if user_badges:
-            medal_icons = [ub.badge.badge_icon or "🏆" for ub in user_badges]
-            medals_display = f"\n🏅 مدال‌های شما: {' '.join(medal_icons)}"
-            if medals_count > 5:
-                medals_display += f" (+{medals_count - 5} مدال دیگر)"
+        if is_premium and user.premium_expires_at:
+            from datetime import datetime
+            expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M")
+            text += f"💎 پریمیوم تا: {expires_at}\n"
         
-        if is_premium:
-            expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "هرگز"
-            text = (
-                f"💎 پریمیوم و پاداش‌ها\n\n"
-                f"✅ وضعیت پریمیوم: فعال\n"
-                f"📅 تاریخ انقضا: {expires_at}\n\n"
-                f"💰 سکه‌های شما: {points}\n"
-            )
-            if medals_display:
-                text += medals_display
-            text += (
-                f"\n\n💡 می‌توانی سکه‌ها را ذخیره کنی و بعداً برای تمدید پریمیوم استفاده کنی!\n\n"
-                f"از منوی زیر انتخاب کنید:"
-            )
-        else:
-            text = (
-                f"💎 پریمیوم و پاداش‌ها\n\n"
-                f"💰 سکه‌های شما: {points}\n"
-            )
-            if medals_display:
-                text += medals_display
-            text += (
-                f"\n\n🎯 راه‌های دریافت پریمیوم:\n"
-                f"1️⃣ ⭐ خرید با استارز تلگرام\n"
-                f"2️⃣ 💳 خرید با شاپرک\n"
-                f"3️⃣ 💎 تبدیل سکه به پریمیوم\n\n"
-                f"✨ چرا پریمیوم بهتره؟\n"
-                f"• اولویت در صف جستجو\n"
-                f"• چت رایگان (بدون کسر سکه)\n"
-                f"• مدت زمان چت بیشتر\n"
-                f"• امکانات ویژه و بیشتر\n"
-                f"• پشتیبانی اولویت‌دار\n\n"
-                f"💡 با تعامل با ربات (پاداش روزانه، چت، دعوت دوستان) سکه کسب کن و پریمیوم بگیر!\n\n"
-                f"از منوی زیر انتخاب کنید:"
-            )
+        text += "\nاز گزینه‌های زیر برای دریافت سکه رایگان استفاده کنید:"
         
         await message.answer(
             text,
-            reply_markup=get_premium_rewards_menu_keyboard(is_premium=is_premium)
+            reply_markup=get_engagement_menu_keyboard()
         )
         break
 
 
-@router.message(F.text == "💰 سکه ی رایگان")
-async def free_coins_menu(message: Message):
-    """Show daily reward menu when user clicks free coins button."""
+@router.message(F.text == "💰 سکه‌ها")
+async def coins_menu(message: Message):
+    """Show coins submenu when user clicks the coins button."""
     user_id = message.from_user.id
     
     async for db_session in get_db():
@@ -825,37 +800,10 @@ async def free_coins_menu(message: Message):
         if not user:
             await message.answer("❌ کاربر یافت نشد.")
             return
-        
-        from core.reward_system import RewardSystem
-        from bot.keyboards.engagement import get_daily_reward_keyboard
-        
-        # Get streak info
-        streak_info = await RewardSystem.get_streak_info(user.id)
-        
-        # Check if can claim today
-        can_claim_today = streak_info.get('can_claim_today', False)
-        
-        if can_claim_today:
-            text = (
-                "💰 سکه ی رایگان روزانه\n\n"
-                "🎁 امروز می‌توانی سکه رایگان دریافت کنی!\n\n"
-                "روی دکمه زیر کلیک کن تا سکه‌هایت را دریافت کنی:"
-            )
-        else:
-            points_claimed = streak_info.get('points_claimed', 0)
-            streak_count = streak_info.get('streak_count', 0)
-            text = (
-                "💰 سکه ی رایگان روزانه\n\n"
-                f"✅ شما امروز سکه خود را دریافت کرده‌اید!\n\n"
-                f"💰 سکه دریافت شده: {points_claimed}\n"
-            )
-            if streak_count > 0:
-                text += f"🔥 سکه ی روزانه: {streak_count} روز\n\n"
-            text += "فردا دوباره بیا تا سکه ی روزانه‌ات را ادامه بدهی!"
-        
+        text = await build_points_info_text(db_session, user)
         await message.answer(
             text,
-            reply_markup=get_daily_reward_keyboard(already_claimed=not can_claim_today)
+            reply_markup=get_coins_menu_keyboard()
         )
         break
 

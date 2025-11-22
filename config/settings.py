@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     CHAT_REQUEST_COST: int = Field(default=1, description="Cost in coins for sending a chat request (non-premium users)")
     DIRECT_MESSAGE_COST: int = Field(default=1, description="Cost in coins for sending a direct message (non-premium users)")
     FILTERED_CHAT_COST: int = Field(default=1, description="Cost in coins for filtered chat (e.g., boy->girl, girl->boy). Non-refundable. Random chat is free.")
+    CHAT_SUCCESS_MESSAGE_COUNT_MALE: int = Field(default=2, description="Minimum messages each male user must send for filtered chat success")
+    CHAT_SUCCESS_MESSAGE_COUNT_FEMALE: int = Field(default=10, description="Minimum messages each female user must send for chat success reward")
     
     # Matchmaking worker configuration
     MATCHMAKING_WORKER_INTERVAL: float = Field(default=1.0, description="Matchmaking worker check interval in seconds (can be decimal like 0.1 for faster matching)")

@@ -37,6 +37,8 @@ import bot.handlers.achievements as achievements
 import bot.handlers.leaderboard as leaderboard
 import bot.handlers.anonymous_call as anonymous_call
 import bot.handlers.premium_plan_admin as premium_plan_admin
+import bot.handlers.coin_package_admin as coin_package_admin
+import bot.handlers.coin_purchase as coin_purchase
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.middlewares.channel_check import ChannelCheckMiddleware
 
@@ -246,6 +248,8 @@ async def setup_bot():
     dp.include_router(leaderboard.router)  # Leaderboard handlers
     dp.include_router(anonymous_call.router)  # Anonymous call handlers
     dp.include_router(premium_plan_admin.router)  # Premium plan admin handlers
+    dp.include_router(coin_package_admin.router)  # Coin package admin handlers
+    dp.include_router(coin_purchase.router)  # Coin purchase handlers
     import bot.handlers.system_settings as system_settings
     dp.include_router(system_settings.router)  # System settings handlers
     dp.include_router(reply.router)  # Reply keyboard handlers
@@ -380,6 +384,8 @@ async def lifespan(app: FastAPI):
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_is_virtual.sql")
         await run_migration(migration_file)
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_create_virtual_profiles_table.sql")
+        await run_migration(migration_file)
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_broadcast_delay.sql")
         await run_migration(migration_file)
         logger.info("✅ Migrations completed")
     except Exception as e:

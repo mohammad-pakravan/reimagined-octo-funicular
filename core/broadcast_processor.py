@@ -7,7 +7,7 @@ Processes pending broadcast messages from the queue
 import logging
 import asyncio
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Set
 from datetime import datetime
 
 from aiogram import Bot
@@ -16,6 +16,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 from db.database import get_db
 from db.models import BroadcastMessage, User
 from utils.broadcast_service import BroadcastService
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,7 @@ class BroadcastProcessor:
     def __init__(self, bot: Bot):
         self.bot = bot
         self.broadcast_service = BroadcastService()
-
-        # Rate limiting settings (based on BROADCAST_SYSTEM.md)
-        self.messages_per_second = 15  # Conservative limit to keep bot responsive
-        self.delay_between_messages = 1.0 / self.messages_per_second  # ~0.067 seconds
+        self.processing_locks: Set[int] = set()  # Track which broadcasts are being processed
         self.batch_size = 1000  # Process in batches for better memory management
 
     async def process_pending_broadcasts(self):
@@ -58,11 +56,32 @@ class BroadcastProcessor:
 
     async def _process_single_broadcast(self, broadcast: BroadcastMessage):
         """پردازش یک پیام همگانی"""
+        # Check if already being processed (lock mechanism)
+        if broadcast.id in self.processing_locks:
+            logger.warning(f"Broadcast {broadcast.id} is already being processed, skipping")
+            return
+        
+        # Acquire lock
+        self.processing_locks.add(broadcast.id)
+        
         try:
-            logger.info(f"Processing broadcast {broadcast.id}: {broadcast.message_type}")
+            # Use delay_seconds from broadcast, or default to 0.067 (~15 msg/sec)
+            delay_seconds = getattr(broadcast, 'delay_seconds', 0.067)
+            messages_per_second = 1.0 / delay_seconds if delay_seconds > 0 else 15
+            
+            logger.info(f"Processing broadcast {broadcast.id}: {broadcast.message_type} (delay: {delay_seconds}s, rate: {messages_per_second:.1f} msg/sec)")
 
             async for session in get_db():
                 try:
+                    # Check if broadcast was already completed (double-check after acquiring lock)
+                    result = await session.execute(
+                        select(BroadcastMessage).where(BroadcastMessage.id == broadcast.id)
+                    )
+                    current_broadcast = result.scalar_one_or_none()
+                    if not current_broadcast or current_broadcast.sent_count > 0:
+                        logger.info(f"Broadcast {broadcast.id} already processed, skipping")
+                        break
+                    
                     # Get active users
                     users = await self.broadcast_service.get_active_users(session)
 
@@ -80,9 +99,9 @@ class BroadcastProcessor:
                     failed_count = 0
 
                     logger.info(
-                        f"Starting broadcast to {total_users} users (rate: {self.messages_per_second} msg/sec)"
+                        f"Starting broadcast to {total_users} users (delay: {delay_seconds:.3f}s, rate: {messages_per_second:.1f} msg/sec)"
                     )
-                    estimated_time = total_users / self.messages_per_second / 60  # minutes
+                    estimated_time = total_users * delay_seconds / 60  # minutes
                     logger.info(f"Estimated completion time: {estimated_time:.1f} minutes")
 
                     for idx, user in enumerate(users, 1):
@@ -103,8 +122,9 @@ class BroadcastProcessor:
                                     f"Sent: {sent_count}, Failed: {failed_count}"
                                 )
 
-                            # Rate limiting delay
-                            await asyncio.sleep(self.delay_between_messages)
+                            # Rate limiting delay - use delay_seconds from broadcast
+                            if idx < total_users:  # Don't wait after last message
+                                await asyncio.sleep(delay_seconds)
 
                         except Exception as e:
                             failed_count += 1
@@ -131,6 +151,9 @@ class BroadcastProcessor:
 
         except Exception as e:
             logger.error(f"Error processing broadcast {broadcast.id}: {e}")
+        finally:
+            # Release lock
+            self.processing_locks.discard(broadcast.id)
 
     async def _send_message_to_user(self, user: User, broadcast: BroadcastMessage):
         """ارسال پیام به یک کاربر"""

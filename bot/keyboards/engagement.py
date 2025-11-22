@@ -6,24 +6,13 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def get_engagement_menu_keyboard() -> InlineKeyboardMarkup:
-    """Get main engagement menu keyboard."""
+    """Get free coins menu keyboard (daily reward + referral only)."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🎁 پاداش روزانه", callback_data="daily_reward:claim"),
-        ],
-        [
-            InlineKeyboardButton(text="⭐ سکه‌ها", callback_data="points:info"),
-            InlineKeyboardButton(text="🏅 مدال‌ها", callback_data="achievements:list"),
+            InlineKeyboardButton(text="🎁 سکه‌ی روزانه رایگان", callback_data="daily_reward:claim"),
         ],
         [
             InlineKeyboardButton(text="👥 دعوت دوستان", callback_data="referral:info"),
-            InlineKeyboardButton(text="📊 رتبه‌بندی", callback_data="leaderboard:view"),
-        ],
-        [
-            InlineKeyboardButton(text="🎯 ایونت‌ها", callback_data="events:list"),
-        ],
-        [
-            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
         ],
     ])
     return keyboard
@@ -36,10 +25,12 @@ def get_premium_rewards_menu_keyboard(is_premium: bool = False) -> InlineKeyboar
     if not is_premium:
         # Show ways to get premium (coins first, then direct purchase)
         keyboard.append([
+                      InlineKeyboardButton(text="💎 خرید پریمیوم", callback_data="premium:info"),
             InlineKeyboardButton(text="💎 تبدیل سکه به پریمیوم", callback_data="points:convert"),
         ])
         keyboard.append([
-            InlineKeyboardButton(text="💎 خرید پریمیوم", callback_data="premium:info"),
+  
+                    InlineKeyboardButton(text="💰 سکه", callback_data="points:info"),
         ])
     else:
         # User has premium, show premium status
@@ -49,21 +40,16 @@ def get_premium_rewards_menu_keyboard(is_premium: bool = False) -> InlineKeyboar
     
     keyboard.append([
         InlineKeyboardButton(text="🎁 پاداش روزانه", callback_data="daily_reward:claim"),
+                InlineKeyboardButton(text="👥 دعوت دوستان", callback_data="referral:info"),
     ])
     keyboard.append([
-        InlineKeyboardButton(text="⭐ سکه‌ها", callback_data="points:info"),
-        InlineKeyboardButton(text="🏆 دستاوردها", callback_data="achievements:list"),
+
     ])
     keyboard.append([
-        InlineKeyboardButton(text="👥 دعوت دوستان", callback_data="referral:info"),
+
         InlineKeyboardButton(text="📊 رتبه‌بندی", callback_data="leaderboard:view"),
     ])
-    keyboard.append([
-        InlineKeyboardButton(text="🎯 ایونت‌ها", callback_data="events:list"),
-    ])
-    keyboard.append([
-        InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
-    ])
+ 
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -72,13 +58,19 @@ def get_points_menu_keyboard() -> InlineKeyboardMarkup:
     """Get points menu keyboard."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
+            InlineKeyboardButton(text="🎁 دریافت سکه رایگان", callback_data="points:daily_reward"),
+        ],
+        [
+            InlineKeyboardButton(text="💳 خرید سکه", callback_data="points:buy"),
+        ],
+        [
             InlineKeyboardButton(text="📜 تاریخچه", callback_data="points:history"),
         ],
         [
             InlineKeyboardButton(text="💎 تبدیل به پریمیوم", callback_data="points:convert"),
         ],
         [
-            InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:menu"),
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
         ],
     ])
     return keyboard
@@ -112,7 +104,7 @@ def get_achievements_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🏅 همه مدال‌ها", callback_data="achievements:badges"),
         ],
         [
-            InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:menu"),
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
         ],
     ])
     return keyboard
@@ -145,7 +137,7 @@ def get_referral_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 آمار دعوت‌ها", callback_data="referral:stats"),
         ],
         [
-            InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:menu"),
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
         ],
     ])
     return keyboard
@@ -163,7 +155,7 @@ def get_leaderboard_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="👥 دعوت‌ها", callback_data="leaderboard:referrals"),
         ],
         [
-            InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:menu"),
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
         ],
     ])
     return keyboard
@@ -216,7 +208,7 @@ def get_leaderboard_user_keyboard(user_ids: list, leaderboard_type: str) -> Inli
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_daily_reward_keyboard(already_claimed: bool = False) -> InlineKeyboardMarkup:
+def get_daily_reward_keyboard(already_claimed: bool = False, back_to_insufficient: bool = False) -> InlineKeyboardMarkup:
     """Get daily reward keyboard."""
     keyboard = []
     
@@ -229,9 +221,86 @@ def get_daily_reward_keyboard(already_claimed: bool = False) -> InlineKeyboardMa
         InlineKeyboardButton(text="📊 وضعیت سکه ی روزانه", callback_data="daily_reward:streak"),
     ])
     
+    # Back button depends on context
+    back_callback = "chat:insufficient_coins" if back_to_insufficient else "menu:free_coins"
     keyboard.append([
-        InlineKeyboardButton(text="🔙 بازگشت", callback_data="engagement:menu"),
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data=back_callback),
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_premium_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get premium submenu keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💎 خرید پریمیوم", callback_data="premium:info"),
+        ],
+        [
+            InlineKeyboardButton(text="💎 تبدیل سکه به پریمیوم", callback_data="points:convert"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
+        ],
+    ])
+
+
+def get_rewards_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get rewards/interactions submenu keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💰 دریافت سکه روزانه", callback_data="daily_reward:claim"),
+        ],
+        [
+            InlineKeyboardButton(text="🎁 سکه هدیه روزانه", callback_data="daily_reward:streak"),
+        ],
+        [
+            InlineKeyboardButton(text="💎 تبدیل سکه به پریمیوم", callback_data="points:convert"),
+        ],
+        [
+            InlineKeyboardButton(text="👥 دعوت از دوستان", callback_data="referral:info"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
+        ],
+    ])
+
+
+def get_coins_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get coins submenu keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💰 نمایش سکه‌ها", callback_data="points:info"),
+        ],
+        [
+            InlineKeyboardButton(text="💳 خرید سکه", callback_data="points:buy"),
+        ],
+        [
+            InlineKeyboardButton(text="📜 تاریخچه سکه", callback_data="points:history"),
+        ],
+        [
+            InlineKeyboardButton(text="💎 تبدیل به پریمیوم", callback_data="points:convert"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
+        ],
+    ])
+
+
+def get_premium_coins_menu_keyboard() -> InlineKeyboardMarkup:
+    """Get combined premium and coins menu keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💎 خرید پریمیوم", callback_data="premium:info"),
+        ],
+        [
+            InlineKeyboardButton(text="💎 تبدیل سکه به پریمیوم", callback_data="points:convert"),
+        ],
+        [
+            InlineKeyboardButton(text="💳 خرید سکه", callback_data="points:buy"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu:main"),
+        ],
+    ])
 

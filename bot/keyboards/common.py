@@ -96,10 +96,10 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="📊 My Profile", callback_data="profile:view"),
-            InlineKeyboardButton(text="💎 Premium", callback_data="engagement:menu"),
+            InlineKeyboardButton(text="💎 Premium", callback_data="menu:premium_coins"),
         ],
         [
-            InlineKeyboardButton(text="🎁 پاداش‌ها و تعامل", callback_data="engagement:menu"),
+            InlineKeyboardButton(text="🎁 پاداش‌ها و تعامل", callback_data="menu:main"),
         ],
     ])
     return keyboard

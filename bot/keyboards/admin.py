@@ -30,6 +30,9 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 آمار", callback_data="admin:stats"),
         ],
         [
+            InlineKeyboardButton(text="📊 آمار کامل ربات", callback_data="admin:stats:full"),
+        ],
+        [
             InlineKeyboardButton(text="🔗 لینک‌های عضویت", callback_data="admin:referral_links"),
             InlineKeyboardButton(text="💰 تنظیمات سکه", callback_data="admin:coin_settings"),
         ],
@@ -45,6 +48,9 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💎 مدیریت پلن‌های پریمیوم", callback_data="admin:premium_plans"),
         ],
         [
+            InlineKeyboardButton(text="🪙 مدیریت پکیج‌های سکه", callback_data="admin:coin_packages"),
+        ],
+        [
             InlineKeyboardButton(text="📺 چنل‌های اجباری", callback_data="admin:mandatory_channels"),
         ],
         [
@@ -55,6 +61,18 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
         ],
     ])
     return keyboard
+
+
+def get_admin_stats_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard for admin stats view."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 بروزرسانی آمار", callback_data="admin:stats:full"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:main"),
+        ],
+    ])
 
 
 def get_admin_users_keyboard() -> InlineKeyboardMarkup:
@@ -227,7 +245,10 @@ def get_admin_system_settings_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💰 هزینه چت فیلتردار", callback_data="admin:setting:filtered_chat_cost"),
         ],
         [
-            InlineKeyboardButton(text="📊 تعداد پیام برای کسر سکه", callback_data="admin:setting:chat_success_message_count"),
+            InlineKeyboardButton(text="📊 تعداد پیام برای کسر سکه (پسر)", callback_data="admin:setting:chat_success_message_count"),
+        ],
+        [
+            InlineKeyboardButton(text="📊 تعداد پیام برای پاداش دخترها", callback_data="admin:setting:chat_success_message_count_female"),
         ],
         [
             InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:main"),

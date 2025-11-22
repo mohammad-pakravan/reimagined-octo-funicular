@@ -14,6 +14,32 @@ from config.settings import settings
 router = Router()
 
 
+async def compose_daily_reward_text(user):
+    """Build the daily reward overview text and claim status."""
+    streak_info = await RewardSystem.get_streak_info(user.id)
+    can_claim_today = streak_info.get('can_claim_today', False)
+
+    if can_claim_today:
+        text = (
+            "💰 سکه ی رایگان روزانه\n\n"
+            "🎁 امروز می‌توانی سکه رایگان دریافت کنی!\n\n"
+            "روی دکمه زیر کلیک کن تا سکه‌هایت را دریافت کنی:"
+        )
+    else:
+        points_claimed = streak_info.get('points_claimed', 0)
+        streak_count = streak_info.get('streak_count', 0)
+        text = (
+            "💰 سکه ی رایگان روزانه\n\n"
+            f"✅ شما امروز سکه خود را دریافت کرده‌اید!\n\n"
+            f"💰 سکه دریافت شده: {points_claimed}\n"
+        )
+        if streak_count > 0:
+            text += f"🔥 سکه ی روزانه: {streak_count} روز\n\n"
+        text += "فردا دوباره بیا تا سکه ی روزانه‌ات را ادامه بدهی!"
+
+    return text, can_claim_today
+
+
 @router.callback_query(F.data == "engagement:menu")
 async def engagement_menu(callback: CallbackQuery):
     """Show engagement menu."""
@@ -94,6 +120,34 @@ async def engagement_menu(callback: CallbackQuery):
                 reply_markup=get_premium_rewards_menu_keyboard(is_premium=is_premium)
             )
         
+        await callback.answer()
+        break
+
+
+@router.callback_query(F.data == "points:daily_reward")
+async def points_daily_reward(callback: CallbackQuery):
+    """Show daily reward overview from the insufficient coins menu."""
+    user_id = callback.from_user.id
+
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+
+        text, can_claim_today = await compose_daily_reward_text(user)
+
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=get_daily_reward_keyboard(already_claimed=not can_claim_today, back_to_insufficient=True)
+            )
+        except Exception:
+            await callback.message.answer(
+                text,
+                reply_markup=get_daily_reward_keyboard(already_claimed=not can_claim_today, back_to_insufficient=True)
+            )
+
         await callback.answer()
         break
 

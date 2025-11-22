@@ -23,6 +23,7 @@ class SystemSettingStates(StatesGroup):
     waiting_chat_message_cost = State()
     waiting_filtered_chat_cost = State()
     waiting_chat_success_message_count = State()
+    waiting_chat_success_message_count_female = State()
 
 
 @router.callback_query(F.data == "admin:system_settings")
@@ -40,6 +41,7 @@ async def admin_system_settings(callback: CallbackQuery):
         chat_cost = await get_system_setting_value(db_session, 'chat_message_cost', '1')
         filtered_chat_cost = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
         success_message_count = await get_system_setting_value(db_session, 'chat_success_message_count', '2')
+        success_message_count_female = await get_system_setting_value(db_session, 'chat_success_message_count_female', '10')
         
         text = (
             "⚙️ تنظیمات سیستم\n\n"
@@ -48,7 +50,8 @@ async def admin_system_settings(callback: CallbackQuery):
             f"🧪 حالت Sandbox: {sandbox_text}\n"
             f"💰 هزینه هر پیام چت (غیر پریمیوم): {chat_cost} سکه\n"
             f"💰 هزینه چت فیلتردار: {filtered_chat_cost} سکه\n"
-            f"📊 تعداد پیام برای کسر سکه: {success_message_count} پیام\n\n"
+            f"📊 تعداد پیام برای کسر سکه (پسر): {success_message_count} پیام\n"
+            f"📊 تعداد پیام برای پاداش دخترها: {success_message_count_female} پیام\n\n"
             "یکی از تنظیمات را برای ویرایش انتخاب کنید:"
         )
         
@@ -227,6 +230,23 @@ async def admin_setting_chat_success_message_count(callback: CallbackQuery, stat
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin:setting:chat_success_message_count_female")
+async def admin_setting_chat_success_message_count_female(callback: CallbackQuery, state: FSMContext):
+    """Set chat success message count for female reward."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ دسترسی محدود است.", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "📊 تنظیم تعداد پیام برای پاداش دخترها\n\n"
+        "لطفاً تعداد پیامی که دختر باید ارسال کند تا چت موفقیت‌آمیز محسوب شود را وارد کنید:\n\n"
+        "مثال: 10\n\n"
+        "یا /cancel برای لغو"
+    )
+    await state.set_state(SystemSettingStates.waiting_chat_success_message_count_female)
+    await callback.answer()
+
+
 @router.message(StateFilter(SystemSettingStates.waiting_chat_success_message_count), F.text & ~F.text.startswith("/"))
 async def process_setting_chat_success_message_count(message: Message, state: FSMContext):
     """Process chat success message count setting."""
@@ -252,6 +272,35 @@ async def process_setting_chat_success_message_count(message: Message, state: FS
         )
         
         await message.answer(f"✅ تعداد پیام برای کسر سکه به {count} پیام تغییر یافت.")
+        await state.clear()
+        break
+
+
+@router.message(StateFilter(SystemSettingStates.waiting_chat_success_message_count_female), F.text & ~F.text.startswith("/"))
+async def process_setting_chat_success_message_count_female(message: Message, state: FSMContext):
+    """Process chat success message count setting for female reward."""
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        count = int(message.text.strip())
+        if count < 1:
+            await message.answer("❌ تعداد پیام نمی‌تواند کمتر از 1 باشد.\n\nلطفاً دوباره وارد کنید:")
+            return
+    except ValueError:
+        await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.\n\nلطفاً دوباره وارد کنید:")
+        return
+
+    async for db_session in get_db():
+        await set_system_setting(
+            db_session,
+            'chat_success_message_count_female',
+            str(count),
+            'int',
+            'Number of messages girls must send to earn chat bonus'
+        )
+
+        await message.answer(f"✅ تعداد پیام برای پاداش دخترها به {count} پیام تغییر یافت.")
         await state.clear()
         break
 

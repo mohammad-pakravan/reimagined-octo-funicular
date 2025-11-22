@@ -11,6 +11,8 @@ from core.matchmaking import MatchmakingQueue
 from core.chat_manager import ChatManager
 from config.settings import settings
 from aiogram import Bot
+from bot.keyboards.reply import get_chat_reply_keyboard
+from utils.validators import get_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -264,8 +266,7 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             await matchmaking_queue.remove_user_from_queue(user2_telegram_id)
             
             # Notify both users and deduct coins if needed
-            from bot.keyboards.reply import get_chat_reply_keyboard
-            from db.crud import check_user_premium, spend_points, get_user_points
+            from db.crud import check_user_premium, get_user_points
             from core.points_manager import PointsManager
             from db.crud import get_system_setting_value
             
@@ -287,56 +288,10 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             
             # Deduct coins for non-premium users with filtered chat
             # NEW LOGIC: 
-            # - If preferred_gender is "male" or "female" (filtered) -> deduct FILTERED_CHAT_COST (NON-REFUNDABLE)
+            # - If preferred_gender is "male" or "female" (filtered) -> deduct FILTERED_CHAT_COST only after chat success
             # - If preferred_gender is None (random) -> FREE
             user1_coins_deducted = False
             user2_coins_deducted = False
-            
-            # Check if user1 selected specific gender (not "all")
-            logger.info(f"User1 {user1_telegram_id}: premium={user1_premium}, pref_gender={user1_pref_gender}, points={user1_points}, cost={filtered_chat_cost}")
-            if not user1_premium and user1_pref_gender is not None and user1_pref_gender in ["male", "female"]:
-                logger.info(f"User1 {user1_telegram_id}: Attempting to deduct {filtered_chat_cost} coins for filtered chat")
-                # Check if user has enough coins
-                if user1_points >= filtered_chat_cost:
-                    success = await spend_points(
-                        db_session,
-                        user1.id,
-                        filtered_chat_cost,
-                        "spent",
-                        "filtered_chat",
-                        f"Cost for filtered chat (non-refundable)"
-                    )
-                    logger.info(f"User1 {user1_telegram_id}: spend_points result = {success}")
-                    if success:
-                        user1_coins_deducted = True
-                        # NOTE: Do NOT call set_chat_cost_deducted because this is non-refundable
-                        user1_points -= filtered_chat_cost
-                        logger.info(f"User1 {user1_telegram_id}: Successfully deducted {filtered_chat_cost} coins, remaining: {user1_points}")
-                else:
-                    logger.warning(f"User1 {user1_telegram_id}: Insufficient coins ({user1_points} < {filtered_chat_cost})")
-            
-            # Check if user2 selected specific gender (not "all")
-            logger.info(f"User2 {user2_telegram_id}: premium={user2_premium}, pref_gender={user2_pref_gender}, points={user2_points}, cost={filtered_chat_cost}")
-            if not user2_premium and user2_pref_gender is not None and user2_pref_gender in ["male", "female"]:
-                logger.info(f"User2 {user2_telegram_id}: Attempting to deduct {filtered_chat_cost} coins for filtered chat")
-                # Check if user has enough coins
-                if user2_points >= filtered_chat_cost:
-                    success = await spend_points(
-                        db_session,
-                        user2.id,
-                        filtered_chat_cost,
-                        "spent",
-                        "filtered_chat",
-                        f"Cost for filtered chat (non-refundable)"
-                    )
-                    logger.info(f"User2 {user2_telegram_id}: spend_points result = {success}")
-                    if success:
-                        user2_coins_deducted = True
-                        # NOTE: Do NOT call set_chat_cost_deducted because this is non-refundable
-                        user2_points -= filtered_chat_cost
-                        logger.info(f"User2 {user2_telegram_id}: Successfully deducted {filtered_chat_cost} coins, remaining: {user2_points}")
-                else:
-                    logger.warning(f"User2 {user2_telegram_id}: Insufficient coins ({user2_points} < {filtered_chat_cost})")
             
             # Helper function to generate cost summary for match found
             def get_match_cost_summary(is_premium, pref_gender, coins_deducted, cost, points):
@@ -347,7 +302,7 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                 elif coins_deducted:
                     return f"💰 {cost} سکه کسر شد (باقی‌مانده: {points})"
                 else:
-                    return f"⚠️ سکه کافی نداشتی ({cost} سکه نیاز داری)"
+                    return f"💡 هزینه این چت {cost} سکه است؛ در صورت موفقیت چت، ازت کسر می‌شود"
             
             # Log for debugging - IMPORTANT: log the actual values
             logger.info(f"User {user1_telegram_id} - premium: {user1_premium}, pref_gender: {user1_pref_gender}, coins_deducted: {user1_coins_deducted}, points: {user1_points}")
@@ -361,17 +316,27 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
                 user2_premium, user2_pref_gender, user2_coins_deducted, filtered_chat_cost, user2_points
             )
             
-            user1_msg = (
-                "✅ هم‌چت پیدا شد!\n\n"
-                f"{user1_cost_summary}\n\n"
-                "💬 می‌تونید شروع به چت کنید."
-            )
-            
-            user2_msg = (
-                "✅ هم‌چت پیدا شد!\n\n"
-                f"{user2_cost_summary}\n\n"
-                "💬 می‌تونید شروع به چت کنید."
-            )
+            def format_profile_ref(user_obj):
+                if user_obj.profile_id:
+                    return f"/user_{user_obj.profile_id}"
+                if user_obj.username:
+                    return f"@{user_obj.username}"
+                display_name = get_display_name(user_obj)
+                return display_name if display_name else "کاربر"
+
+            def build_connection_msg(target, peer):
+                peer_ref = format_profile_ref(peer)
+                return (
+                    "✅ هم‌چت پیدا شد!\n\n"
+             
+                    f"💰 هزینه این چت {filtered_chat_cost} \n"
+                    " در صورت موفقیت چت، ازت کسر می‌شود.\n"
+
+                    "💬 به دوستت سلام کن"
+                )
+
+            user1_msg = build_connection_msg(user1, user2)
+            user2_msg = build_connection_msg(user2, user1)
             
             
             await bot_instance.send_message(
