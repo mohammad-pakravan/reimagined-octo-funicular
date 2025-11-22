@@ -257,12 +257,15 @@ async def setup_bot():
     dp.include_router(help_handler.router)  # Help menu handlers
     import bot.handlers.game as game
     dp.include_router(game.router)  # Game handlers (must be before message handler for dice/dart)
+    import bot.handlers.playlist as playlist
+    dp.include_router(playlist.router)  # Playlist handlers
     dp.include_router(message.router)  # Message handler should be last
     
     # Set chat manager for handlers
     reply.set_chat_manager(chat_manager)
     chat_request.set_chat_manager(chat_manager)
     call_request.set_chat_manager(chat_manager)
+    playlist.set_chat_manager(chat_manager)
     
     logger.info("✅ Bot handlers registered")
     

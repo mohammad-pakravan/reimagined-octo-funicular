@@ -14,7 +14,8 @@ from db.models import (
     Achievement, UserAchievement, WeeklyChallenge, UserChallenge,
     AdminReferralLink, AdminReferralLinkClick, AdminReferralLinkSignup, CoinSetting,                                                                            
     BroadcastMessage, BroadcastMessageReceipt, CoinPackage, PaymentTransaction,
-    Event, EventParticipant, EventReward, PremiumPlan, CoinRewardSetting, MandatoryChannel                                                                      
+    Event, EventParticipant, EventReward, PremiumPlan, CoinRewardSetting, MandatoryChannel,
+    UserPlaylist, PlaylistItem                                                                      
 )
 from config.settings import settings
 
@@ -4025,5 +4026,113 @@ async def get_chat_summary(session: AsyncSession) -> dict[str, int]:
         "active": active.scalar() or 0,
         "ended": ended.scalar() or 0,
     }
+
+
+# ============= Playlist CRUD =============
+
+async def create_user_playlist(session: AsyncSession, user_id: int, name: str = "پلی‌لیست من") -> UserPlaylist:
+    """Create a playlist for a user."""
+    playlist = UserPlaylist(user_id=user_id, name=name)
+    session.add(playlist)
+    await session.commit()
+    await session.refresh(playlist)
+    return playlist
+
+
+async def get_user_playlist(session: AsyncSession, user_id: int) -> Optional[UserPlaylist]:
+    """Get user's playlist, creating it if it doesn't exist."""
+    query = select(UserPlaylist).where(UserPlaylist.user_id == user_id)
+    result = await session.execute(query)
+    playlist = result.scalar_one_or_none()
+    
+    if not playlist:
+        # Create playlist if it doesn't exist
+        playlist = await create_user_playlist(session, user_id)
+    
+    return playlist
+
+
+async def get_partner_playlist(session: AsyncSession, partner_user_id: int) -> Optional[UserPlaylist]:
+    """Get partner's playlist for viewing in chat."""
+    query = select(UserPlaylist).where(UserPlaylist.user_id == partner_user_id)
+    result = await session.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def add_item_to_playlist(
+    session: AsyncSession,
+    playlist_id: int,
+    message_type: str,
+    file_id: str,
+    title: Optional[str] = None,
+    performer: Optional[str] = None,
+    duration: Optional[int] = None,
+    forwarded_from_chat_id: Optional[int] = None,
+    forwarded_from_message_id: Optional[int] = None,
+) -> PlaylistItem:
+    """Add a music item to a playlist."""
+    item = PlaylistItem(
+        playlist_id=playlist_id,
+        message_type=message_type,
+        file_id=file_id,
+        title=title,
+        performer=performer,
+        duration=duration,
+        forwarded_from_chat_id=forwarded_from_chat_id,
+        forwarded_from_message_id=forwarded_from_message_id,
+    )
+    session.add(item)
+    await session.commit()
+    await session.refresh(item)
+    return item
+
+
+async def remove_item_from_playlist(session: AsyncSession, item_id: int) -> bool:
+    """Remove an item from a playlist."""
+    query = select(PlaylistItem).where(PlaylistItem.id == item_id)
+    result = await session.execute(query)
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        return False
+    
+    await session.delete(item)
+    await session.commit()
+    return True
+
+
+async def get_playlist_items(
+    session: AsyncSession,
+    playlist_id: int,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[PlaylistItem]:
+    """Get playlist items with pagination."""
+    query = (
+        select(PlaylistItem)
+        .where(PlaylistItem.playlist_id == playlist_id)
+        .order_by(PlaylistItem.added_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_playlist_item_count(session: AsyncSession, playlist_id: int) -> int:
+    """Get total count of items in a playlist."""
+    query = select(func.count(PlaylistItem.id)).where(PlaylistItem.playlist_id == playlist_id)
+    result = await session.execute(query)
+    return result.scalar() or 0
+
+
+async def check_item_exists_in_playlist(session: AsyncSession, playlist_id: int, file_id: str) -> bool:
+    """Check if an item with the same file_id already exists in the playlist."""
+    query = select(PlaylistItem).where(
+        PlaylistItem.playlist_id == playlist_id,
+        PlaylistItem.file_id == file_id
+    )
+    result = await session.execute(query)
+    return result.scalar_one_or_none() is not None
 
 

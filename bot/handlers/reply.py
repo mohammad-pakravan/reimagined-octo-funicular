@@ -1,9 +1,12 @@
 """
 Reply keyboard handlers for normal keyboard buttons.
 """
+import logging
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
+
+logger = logging.getLogger(__name__)
 
 from db.database import get_db
 from db.crud import get_user_by_telegram_id
@@ -364,8 +367,6 @@ async def partner_profile_button(message: Message):
             from aiogram import Bot
             from config.settings import settings
             from utils.minio_storage import is_url_accessible_from_internet
-            import logging
-            logger = logging.getLogger(__name__)
             
             bot = Bot(token=settings.BOT_TOKEN)
             try:
@@ -595,6 +596,13 @@ async def toggle_private_mode_button(message: Message):
         new_private_mode = not current_private_mode
         await chat_mgr.set_private_mode(chat_room.id, user.id, new_private_mode)
         
+        # Get partner to notify them
+        partner_id = await chat_mgr.get_partner_id(user.id, db_session)
+        partner = None
+        if partner_id:
+            from db.crud import get_user_by_id
+            partner = await get_user_by_id(db_session, partner_id)
+        
         # Update keyboard with new private mode status
         updated_keyboard = get_chat_reply_keyboard(private_mode=new_private_mode)
         
@@ -604,12 +612,46 @@ async def toggle_private_mode_button(message: Message):
                 "از این به بعد پیام‌های شما غیرقابل فوروارد و ذخیره هستند.",
                 reply_markup=updated_keyboard
             )
+            
+            # Notify partner
+            if partner:
+                try:
+                    from aiogram import Bot
+                    bot = Bot(token=settings.BOT_TOKEN)
+                    user_name = user.display_name or user.username or "مخاطب"
+                    await bot.send_message(
+                        chat_id=partner.telegram_id,
+                        text=(
+                            f"🔒 {user_name} حالت خصوصی چت را فعال کرد!\n\n"
+                            f"از این به بعد پیام‌های {user_name} غیرقابل فوروارد و ذخیره هستند."
+                        )
+                    )
+                    await bot.session.close()
+                except Exception as e:
+                    logger.error(f"Error sending private mode notification: {e}")
         else:
             await message.answer(
                 "🔓 حالت خصوصی غیرفعال شد!\n\n"
                 "پیام‌های شما قابل فوروارد و ذخیره هستند.",
                 reply_markup=updated_keyboard
             )
+            
+            # Notify partner
+            if partner:
+                try:
+                    from aiogram import Bot
+                    bot = Bot(token=settings.BOT_TOKEN)
+                    user_name = user.display_name or user.username or "مخاطب"
+                    await bot.send_message(
+                        chat_id=partner.telegram_id,
+                        text=(
+                            f"🔓 {user_name} حالت خصوصی چت را غیرفعال کرد!\n\n"
+                            f"از این به بعد پیام‌های {user_name} قابل فوروارد و ذخیره هستند."
+                        )
+                    )
+                    await bot.session.close()
+                except Exception as e:
+                    logger.error(f"Error sending private mode notification: {e}")
         break
 
 
@@ -808,7 +850,7 @@ async def coins_menu(message: Message):
         break
 
 
-@router.message(F.text == "💎 اشتراک")
+@router.message(F.text == "💰 خرید سکه")
 async def subscription_menu(message: Message):
     """Show subscription menu (premium plans and coin packages)."""
     user_id = message.from_user.id

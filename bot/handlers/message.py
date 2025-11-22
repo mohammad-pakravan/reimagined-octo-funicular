@@ -55,6 +55,74 @@ def contains_mention(text: str) -> bool:
     return '@' in text
 
 
+@router.message(F.content_type.in_({ContentType.AUDIO, ContentType.VOICE}) | (F.forward_from_chat & F.audio))
+async def handle_music_message(message: Message, state: FSMContext):
+    """Handle music messages and show add-to-playlist button."""
+    from bot.handlers.registration import RegistrationStates
+    from bot.keyboards.playlist import get_add_to_playlist_keyboard
+    
+    # Skip if user is in registration state or DM state
+    current_state = await state.get_state()
+    if current_state in [
+        RegistrationStates.waiting_age,
+        RegistrationStates.waiting_city,
+        RegistrationStates.waiting_province,
+        RegistrationStates.waiting_display_name,
+        RegistrationStates.waiting_photo,
+        RegistrationStates.waiting_gender
+    ] or current_state == "dm:waiting_message" or current_state == "dm:waiting_reply":
+        return
+    
+    user_id = message.from_user.id
+    
+    # Check if this is a music message (audio, voice, or forwarded audio)
+    is_music = False
+    file_id = None
+    
+    if message.audio:
+        is_music = True
+        file_id = message.audio.file_id
+    elif message.voice:
+        is_music = True
+        file_id = message.voice.file_id
+    elif message.forward_from_chat and message.audio:
+        is_music = True
+        file_id = message.audio.file_id
+    
+    if not is_music or not file_id:
+        return
+    
+    # Only show button if user is not in active chat (to avoid interfering with chat forwarding)
+    # Or show it after a short delay to not interfere with message forwarding
+    if chat_manager:
+        async for db_session in get_db():
+            from db.crud import get_user_by_telegram_id
+            user = await get_user_by_telegram_id(db_session, user_id)
+            if user and await chat_manager.is_chat_active(user.id, db_session):
+                # User is in chat, don't show button here (it will interfere with forwarding)
+                # The button can be shown via inline keyboard on the forwarded message
+                break
+            
+            # User is not in chat, show button
+            try:
+                await message.reply(
+                    "💡 می‌خواهی این موزیک را به پلی‌لیست خود اضافه کنی؟",
+                    reply_markup=get_add_to_playlist_keyboard(message.message_id, file_id)
+                )
+            except Exception as e:
+                logger.error(f"Error showing add-to-playlist button: {e}")
+            break
+    else:
+        # No chat manager, show button anyway
+        try:
+            await message.reply(
+                "💡 می‌خواهی این موزیک را به پلی‌لیست خود اضافه کنی؟",
+                reply_markup=get_add_to_playlist_keyboard(message.message_id, file_id)
+            )
+        except Exception as e:
+            logger.error(f"Error showing add-to-playlist button: {e}")
+
+
 @router.message(F.reply_to_message & F.content_type.in_({ContentType.TEXT, ContentType.VOICE, ContentType.PHOTO, ContentType.VIDEO, ContentType.STICKER, ContentType.ANIMATION}))
 async def handle_reply_message(message: Message, state: FSMContext):
     """Handle reply messages - forward reply to chat partner with reply context."""

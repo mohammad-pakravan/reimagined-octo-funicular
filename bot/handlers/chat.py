@@ -446,8 +446,11 @@ async def add_user_to_queue_direct(
             reply_markup=get_queue_status_keyboard(user_premium)
         )
         
-        await state.clear()
-        
+    await state.clear()
+    
+    # Start timeout task (2 minutes)
+    asyncio.create_task(check_matchmaking_timeout(user_id, user_id))
+    
     return
 
 
@@ -832,6 +835,7 @@ async def check_matchmaking_timeout(user_id: int, telegram_id: int):
     import logging
     logger = logging.getLogger(__name__)
     import time as time_module
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
     start_time = time_module.time()
     logger.info(f"Timeout task started for user {user_id}, will check after 120 seconds")
@@ -870,13 +874,28 @@ async def check_matchmaking_timeout(user_id: int, telegram_id: int):
             # Remove from queue
             await matchmaking_queue.remove_user_from_queue(user_id)
             
-            # Notify user
+            # Notify user with encouraging message
             bot = Bot(token=settings.BOT_TOKEN)
             try:
+                # Create inline keyboard with retry button
+                retry_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🔍 جستجوی دوباره",
+                            callback_data="pref_gender:all"
+                        )
+                    ]
+                ])
+                
                 await bot.send_message(
                     telegram_id,
-                    "❌ متأسفانه کسی رو برات پیدا نکردیم.\n\n"
-                    "💡 می‌تونی دوباره امتحان کنی یا از طریق پروفایل‌ها با کاربران خاص چت کنی."
+                    "⏰ زمان جستجو به پایان رسید\n\n"
+                    "😊 متأسفانه در این لحظه همه کاربران مشغول صحبت هستند!\n\n"
+                    "💡 نگران نباش، می‌تونی:\n"
+                    "🔹 دوباره تلاش کنی\n"
+                    "🔹 از بخش «🔍 جستجوی کاربران» با کاربران خاص چت کنی\n"
+                    "🔹 یا از پروفایل‌های دیگران بازدید کنی\n\n",
+                    reply_markup=retry_keyboard
                 )
                 await bot.session.close()
                 logger.info(f"Timeout message sent to user {user_id}")

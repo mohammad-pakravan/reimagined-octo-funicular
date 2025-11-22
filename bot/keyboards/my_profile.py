@@ -32,6 +32,9 @@ def get_my_profile_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✉️ پیام‌های دایرکت", callback_data="my_profile:direct_messages"),
         ],
         [
+            InlineKeyboardButton(text="🎵 پلی‌لیست من", callback_data="playlist:view"),
+        ],
+        [
             InlineKeyboardButton(text="🗑️ حذف اکانت", callback_data="my_profile:delete_account"),
         ],
         [

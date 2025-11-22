@@ -98,6 +98,7 @@ class User(Base):
     achievements = relationship("UserAchievement", back_populates="user")
     challenges = relationship("UserChallenge", back_populates="user")
     virtual_profile = relationship("VirtualProfile", back_populates="user", uselist=False)
+    playlist = relationship("UserPlaylist", back_populates="user", uselist=False)
 
     __table_args__ = (
         Index('idx_telegram_id', 'telegram_id'),
@@ -1098,4 +1099,68 @@ class MandatoryChannel(Base):
     
     def __repr__(self):
         return f"<MandatoryChannel(id={self.id}, channel_id={self.channel_id}, is_active={self.is_active})>"
+
+
+# ============= Playlist Models =============
+
+class UserPlaylist(Base):
+    """User playlist model for storing user playlists."""
+    __tablename__ = "user_playlists"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    name = Column(String(255), default="پلی‌لیست من", nullable=False)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="playlist")
+    items = relationship("PlaylistItem", back_populates="playlist", cascade="all, delete-orphan", order_by="PlaylistItem.added_at.desc()")
+    
+    __table_args__ = (
+        Index('idx_user_id', 'user_id'),
+    )
+    
+    def __repr__(self):
+        return f"<UserPlaylist(id={self.id}, user_id={self.user_id}, name={self.name})>"
+
+
+class PlaylistItem(Base):
+    """Playlist item model for storing individual music items in playlists."""
+    __tablename__ = "playlist_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    playlist_id = Column(Integer, ForeignKey("user_playlists.id"), nullable=False, index=True)
+    
+    # Message type: 'audio', 'voice', 'forwarded'
+    message_type = Column(String(50), nullable=False)
+    
+    # Telegram file_id for the music
+    file_id = Column(String(512), nullable=False)
+    
+    # Optional metadata
+    title = Column(String(255), nullable=True)  # Song title
+    performer = Column(String(255), nullable=True)  # Artist name
+    duration = Column(Integer, nullable=True)  # Duration in seconds
+    
+    # For forwarded messages
+    forwarded_from_chat_id = Column(BigInteger, nullable=True)
+    forwarded_from_message_id = Column(Integer, nullable=True)
+    
+    # Timestamps
+    added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationships
+    playlist = relationship("UserPlaylist", back_populates="items")
+    
+    __table_args__ = (
+        Index('idx_playlist_id', 'playlist_id'),
+        Index('idx_message_type', 'message_type'),
+        Index('idx_added_at', 'added_at'),
+    )
+    
+    def __repr__(self):
+        return f"<PlaylistItem(id={self.id}, playlist_id={self.playlist_id}, message_type={self.message_type})>"
 
