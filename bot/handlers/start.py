@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 
 from db.database import get_db
-from db.crud import get_user_by_telegram_id, get_payment_transaction_by_transaction_id, check_user_premium, get_premium_plan_by_id, get_active_mandatory_channels
+from db.crud import get_user_by_telegram_id, get_payment_transaction_by_transaction_id, check_user_premium, get_premium_plan_by_id, get_coin_package_by_id, get_active_mandatory_channels
 from bot.keyboards.common import get_main_menu_keyboard, get_gender_keyboard, get_channel_check_keyboard
 from bot.keyboards.reply import remove_keyboard, get_main_reply_keyboard
 from bot.keyboards.admin import get_admin_reply_keyboard
@@ -44,30 +44,60 @@ async def check_payment_status(message: Message, transaction_id: str):
         
         # Check transaction status
         if transaction.status == 'completed':
-            # Get plan name
-            plan_name = "اشتراک پریمیوم"
-            if transaction.plan_id:
+            # Check if this is a coin purchase or premium purchase
+            if transaction.coin_package_id:
+                # This is a coin purchase
+                coin_package = await get_coin_package_by_id(db_session, transaction.coin_package_id)
+                if coin_package:
+                    package_name = coin_package.package_name
+                    coin_amount = coin_package.coin_amount
+                    
+                    # Get user points to show current balance
+                    from db.crud import get_or_create_user_points
+                    user_points = await get_or_create_user_points(db_session, user.id)
+                    current_balance = user_points.points if user_points else 0
+                    
+                    await message.answer(
+                        f"✅ پرداخت موفق!\n\n"
+                        f"💰 پکیج «{package_name}» به حساب شما اضافه شد!\n\n"
+                        f"💎 موجودی فعلی: {current_balance:,} سکه",
+                        reply_markup=get_main_menu_keyboard()
+                    )
+                else:
+                    await message.answer(
+                        f"✅ پرداخت موفق!\n\n"
+                        f"💰 سکه‌های خریداری شده به حساب شما اضافه شد!",
+                        reply_markup=get_main_menu_keyboard()
+                    )
+            elif transaction.plan_id:
+                # This is a premium purchase
                 plan = await get_premium_plan_by_id(db_session, transaction.plan_id)
-                if plan:
-                    plan_name = plan.plan_name
-            
-            # Check if user has premium now
-            is_premium = await check_user_premium(db_session, user.id)
-            
-            if is_premium:
-                expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "نامشخص"
-                await message.answer(
-                    f"✅ پرداخت موفق!\n\n"
-                    f"💎 اشتراک پریمیوم «{plan_name}» فعال شد!\n\n"
-                    f"📅 تاریخ انقضا: {expires_at}\n\n"
-                    f"از این به بعد می‌توانید از تمام امکانات پریمیوم استفاده کنید.",
-                    reply_markup=get_premium_rewards_menu_keyboard()
-                )
+                plan_name = plan.plan_name if plan else "اشتراک پریمیوم"
+                
+                # Check if user has premium now
+                is_premium = await check_user_premium(db_session, user.id)
+                
+                if is_premium:
+                    expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M") if user.premium_expires_at else "نامشخص"
+                    await message.answer(
+                        f"✅ پرداخت موفق!\n\n"
+                        f"💎 اشتراک پریمیوم «{plan_name}» فعال شد!\n\n"
+                        f"📅 تاریخ انقضا: {expires_at}\n\n"
+                        f"از این به بعد می‌توانید از تمام امکانات پریمیوم استفاده کنید.",
+                        reply_markup=get_premium_rewards_menu_keyboard()
+                    )
+                else:
+                    await message.answer(
+                        f"✅ پرداخت موفق!\n\n"
+                        f"💎 اشتراک پریمیوم «{plan_name}» فعال شد!",
+                        reply_markup=get_main_menu_keyboard()
+                    )
             else:
+                # Unknown transaction type
                 await message.answer(
                     f"✅ پرداخت موفق!\n\n"
-                    f"💎 اشتراک پریمیوم «{plan_name}» فعال شد!\n\n"
-                    f"لطفاً چند لحظه صبر کنید تا اشتراک شما فعال شود."
+                    f"خرید شما با موفقیت انجام شد.",
+                    reply_markup=get_main_menu_keyboard()
                 )
         elif transaction.status == 'failed':
             await message.answer(
