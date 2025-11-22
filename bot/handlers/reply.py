@@ -808,6 +808,49 @@ async def coins_menu(message: Message):
         break
 
 
+@router.message(F.text == "💎 اشتراک")
+async def subscription_menu(message: Message):
+    """Show subscription menu (premium plans and coin packages)."""
+    user_id = message.from_user.id
+    
+    async for db_session in get_db():
+        from db.crud import get_user_by_telegram_id, get_visible_coin_packages, get_visible_premium_plans, check_user_premium
+        from bot.keyboards.coin_package import get_insufficient_coins_keyboard
+        from core.points_manager import PointsManager
+        
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await message.answer("❌ کاربر یافت نشد.")
+            return
+        
+        user_points = await PointsManager.get_balance(user.id)
+        is_premium = await check_user_premium(db_session, user.id)
+        
+        packages = await get_visible_coin_packages(db_session)
+        premium_plans = await get_visible_premium_plans(db_session)
+        
+        text = f"💎 اشتراک و خرید سکه\n\n"
+        text += f"💰 سکه‌های فعلی شما: {user_points}\n\n"
+        
+        if is_premium and user.premium_expires_at:
+            from datetime import datetime
+            expires_at = user.premium_expires_at.strftime("%Y-%m-%d %H:%M")
+            text += f"💎 پریمیوم فعال تا: {expires_at}\n\n"
+        
+        text += (
+            "💡 می‌تونی:\n"
+            "🔹 پریمیوم بگیری (چت رایگان)\n"
+            "🔹 سکه بخرید\n"
+            "🔹 سکه رایگان روزانه بگیری\n"
+        )
+        
+        await message.answer(
+            text,
+            reply_markup=get_insufficient_coins_keyboard(packages, premium_plans)
+        )
+        break
+
+
 @router.message(F.text == "👥 دعوت دوستان( سکه رایگان )")
 async def referral_menu(message: Message):
     """Show referral menu when user clicks referral button."""

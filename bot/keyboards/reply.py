@@ -18,11 +18,14 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     keyboard.add(KeyboardButton(text="🎁 سکه رایگان"))
     keyboard.add(KeyboardButton(text="🔍 جستجوی کاربران"))
     
-    # Row 3: Help, My Profile
+    # Row 3: Subscription, Help
+    keyboard.add(KeyboardButton(text="💎 اشتراک"))
     keyboard.add(KeyboardButton(text="📖 راهنما"))
+    
+    # Row 4: My Profile
     keyboard.add(KeyboardButton(text="📊 پروفایل من"))
     
-    keyboard.adjust(1, 2, 2)
+    keyboard.adjust(1, 2, 2, 1)
     return keyboard.as_markup(resize_keyboard=True, persistent=True)
 
 
