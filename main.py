@@ -373,10 +373,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
     
-    # Run migrations
+    # Run migrations (order matters - dependencies first)
     try:
         from db.database import run_migration
         import os
+        
+        # Core migrations (must run first)
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_payment_system.sql")
+        await run_migration(migration_file)
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_premium_plans.sql")
+        await run_migration(migration_file)
+        
+        # Feature migrations
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_last_seen.sql")
         await run_migration(migration_file)
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_default_chat_filter.sql")
@@ -386,6 +394,8 @@ async def lifespan(app: FastAPI):
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_create_virtual_profiles_table.sql")
         await run_migration(migration_file)
         migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_broadcast_delay.sql")
+        await run_migration(migration_file)
+        migration_file = os.path.join(os.path.dirname(__file__), "db", "migration_add_coin_packages.sql")
         await run_migration(migration_file)
         logger.info("✅ Migrations completed")
     except Exception as e:
