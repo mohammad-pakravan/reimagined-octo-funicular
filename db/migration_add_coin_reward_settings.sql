@@ -15,11 +15,11 @@ CREATE TABLE IF NOT EXISTS coin_reward_settings (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default values
-INSERT INTO coin_reward_settings (activity_type, coins_amount, description, is_active) VALUES
-('daily_login', 10, 'ورود روزانه', TRUE),
-('chat_success', 50, 'چت موفق', TRUE),
-('mutual_like', 100, 'لایک متقابل', TRUE),
-('referral_referrer', 500, 'دعوت‌کننده', TRUE),
-('referral_referred', 200, 'دعوت‌شده', TRUE)
-ON DUPLICATE KEY UPDATE coins_amount=VALUES(coins_amount);
+INSERT INTO coin_reward_settings (activity_type, coins_amount, description, is_active, created_at, updated_at) VALUES
+('daily_login', 10, 'ورود روزانه', TRUE, NOW(), NOW()),
+('chat_success', 50, 'چت موفق', TRUE, NOW(), NOW()),
+('mutual_like', 100, 'لایک متقابل', TRUE, NOW(), NOW()),
+('referral_referrer', 500, 'دعوت‌کننده', TRUE, NOW(), NOW()),
+('referral_referred', 200, 'دعوت‌شده', TRUE, NOW(), NOW())
+ON DUPLICATE KEY UPDATE coins_amount=VALUES(coins_amount), updated_at=NOW();
 
