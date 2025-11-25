@@ -191,17 +191,18 @@ INSERT IGNORE INTO badges (badge_key, badge_name, badge_description, badge_icon,
 ('premium', 'Premium Member', 'Premium subscriber', '💎', 'special');
 
 -- Insert default achievements
+-- Note: points_reward set to 0 - achievements no longer give coins, only badges
 INSERT IGNORE INTO achievements (achievement_key, achievement_name, achievement_description, achievement_type, target_value, points_reward, badge_id) VALUES
-('first_chat', 'First Chat', 'Complete your first chat', 'chat_count', 1, 50, (SELECT id FROM badges WHERE badge_key = 'first_chat' LIMIT 1)),
-('chat_10', 'Chatter', 'Complete 10 chats', 'chat_count', 10, 200, NULL),
-('chat_50', 'Chat Master', 'Complete 50 chats', 'chat_count', 50, 1000, (SELECT id FROM badges WHERE badge_key = 'chat_master' LIMIT 1)),
-('like_10', 'Liked', 'Receive 10 likes', 'like_count', 10, 100, NULL),
-('like_100', 'Social Butterfly', 'Receive 100 likes', 'like_count', 100, 500, (SELECT id FROM badges WHERE badge_key = 'social_butterfly' LIMIT 1)),
-('like_500', 'Popular', 'Receive 500 likes', 'like_count', 500, 2000, (SELECT id FROM badges WHERE badge_key = 'popular' LIMIT 1)),
-('streak_7', 'Week Warrior', '7 day login streak', 'streak', 7, 300, (SELECT id FROM badges WHERE badge_key = 'streak_7' LIMIT 1)),
-('streak_30', 'Monthly Warrior', '30 day login streak', 'streak', 30, 1500, (SELECT id FROM badges WHERE badge_key = 'streak_30' LIMIT 1)),
-('referral_1', 'Referrer', 'Invite your first friend', 'referral_count', 1, 500, (SELECT id FROM badges WHERE badge_key = 'referrer' LIMIT 1)),
-('referral_10', 'Super Referrer', 'Invite 10 friends', 'referral_count', 10, 5000, (SELECT id FROM badges WHERE badge_key = 'super_referrer' LIMIT 1));
+('first_chat', 'First Chat', 'Complete your first chat', 'chat_count', 1, 0, (SELECT id FROM badges WHERE badge_key = 'first_chat' LIMIT 1)),
+('chat_10', 'Chatter', 'Complete 10 chats', 'chat_count', 10, 0, NULL),
+('chat_50', 'Chat Master', 'Complete 50 chats', 'chat_count', 50, 0, (SELECT id FROM badges WHERE badge_key = 'chat_master' LIMIT 1)),
+('like_10', 'Liked', 'Receive 10 likes', 'like_count', 10, 0, NULL),
+('like_100', 'Social Butterfly', 'Receive 100 likes', 'like_count', 100, 0, (SELECT id FROM badges WHERE badge_key = 'social_butterfly' LIMIT 1)),
+('like_500', 'Popular', 'Receive 500 likes', 'like_count', 500, 0, (SELECT id FROM badges WHERE badge_key = 'popular' LIMIT 1)),
+('streak_7', 'Week Warrior', '7 day login streak', 'streak', 7, 0, (SELECT id FROM badges WHERE badge_key = 'streak_7' LIMIT 1)),
+('streak_30', 'Monthly Warrior', '30 day login streak', 'streak', 30, 0, (SELECT id FROM badges WHERE badge_key = 'streak_30' LIMIT 1)),
+('referral_1', 'Referrer', 'Invite your first friend', 'referral_count', 1, 0, (SELECT id FROM badges WHERE badge_key = 'referrer' LIMIT 1)),
+('referral_10', 'Super Referrer', 'Invite 10 friends', 'referral_count', 10, 0, (SELECT id FROM badges WHERE badge_key = 'super_referrer' LIMIT 1));
 
 
 

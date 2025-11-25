@@ -55,9 +55,13 @@ def contains_mention(text: str) -> bool:
     return '@' in text
 
 
-@router.message(F.content_type.in_({ContentType.AUDIO, ContentType.VOICE}) | (F.forward_from_chat & F.audio))
+@router.message(F.audio | (F.forward_from_chat & F.audio))
 async def handle_music_message(message: Message, state: FSMContext):
-    """Handle music messages and show add-to-playlist button."""
+    """Handle music messages (audio files) and show add-to-playlist button.
+    
+    Note: Voice messages (ContentType.VOICE) are handled by forward_message
+    to be forwarded in active chats, not treated as music.
+    """
     from bot.handlers.registration import RegistrationStates
     from bot.keyboards.playlist import get_add_to_playlist_keyboard
     
@@ -75,16 +79,13 @@ async def handle_music_message(message: Message, state: FSMContext):
     
     user_id = message.from_user.id
     
-    # Check if this is a music message (audio, voice, or forwarded audio)
+    # Check if this is a music message (audio file, not voice message)
     is_music = False
     file_id = None
     
     if message.audio:
         is_music = True
         file_id = message.audio.file_id
-    elif message.voice:
-        is_music = True
-        file_id = message.voice.file_id
     elif message.forward_from_chat and message.audio:
         is_music = True
         file_id = message.audio.file_id
@@ -99,9 +100,9 @@ async def handle_music_message(message: Message, state: FSMContext):
             from db.crud import get_user_by_telegram_id
             user = await get_user_by_telegram_id(db_session, user_id)
             if user and await chat_manager.is_chat_active(user.id, db_session):
-                # User is in chat, don't show button here (it will interfere with forwarding)
-                # The button can be shown via inline keyboard on the forwarded message
-                break
+                # User is in chat, return to let forward_message handler process it
+                # This allows voice messages to be forwarded properly
+                return
             
             # User is not in chat, show button
             try:
@@ -111,7 +112,7 @@ async def handle_music_message(message: Message, state: FSMContext):
                 )
             except Exception as e:
                 logger.error(f"Error showing add-to-playlist button: {e}")
-            break
+            return  # Return after showing button to prevent further processing
     else:
         # No chat manager, show button anyway
         try:
@@ -121,9 +122,10 @@ async def handle_music_message(message: Message, state: FSMContext):
             )
         except Exception as e:
             logger.error(f"Error showing add-to-playlist button: {e}")
+        return  # Return after showing button
 
 
-@router.message(F.reply_to_message & F.content_type.in_({ContentType.TEXT, ContentType.VOICE, ContentType.PHOTO, ContentType.VIDEO, ContentType.STICKER, ContentType.ANIMATION}))
+@router.message(F.reply_to_message & F.content_type.in_({ContentType.TEXT, ContentType.VOICE, ContentType.PHOTO, ContentType.VIDEO, ContentType.VIDEO_NOTE, ContentType.STICKER, ContentType.ANIMATION}))
 async def handle_reply_message(message: Message, state: FSMContext):
     """Handle reply messages - forward reply to chat partner with reply context."""
     logger.info(f"Received reply message: message_id={message.message_id}, user_id={message.from_user.id}, reply_to={message.reply_to_message.message_id if message.reply_to_message else None}")
@@ -290,20 +292,24 @@ async def handle_reply_message(message: Message, state: FSMContext):
                     protect_content=private_mode
                 )
             elif message.photo:
+                # Forward photo with support for self-destructing media (has_media_spoiler)
                 sent_message = await bot.send_photo(
                     partner_telegram_id,
                     photo=message.photo[-1].file_id,
                     caption=message.caption,
                     reply_to_message_id=reply_to_id,
-                    protect_content=private_mode
+                    protect_content=private_mode,
+                    has_spoiler=getattr(message, 'has_media_spoiler', False) or False
                 )
             elif message.video:
+                # Forward video with support for self-destructing media (has_media_spoiler)
                 sent_message = await bot.send_video(
                     partner_telegram_id,
                     video=message.video.file_id,
                     caption=message.caption,
                     reply_to_message_id=reply_to_id,
-                    protect_content=private_mode
+                    protect_content=private_mode,
+                    has_spoiler=getattr(message, 'has_media_spoiler', False) or False
                 )
             elif message.sticker:
                 sent_message = await bot.send_sticker(
@@ -317,6 +323,14 @@ async def handle_reply_message(message: Message, state: FSMContext):
                     partner_telegram_id,
                     animation=message.animation.file_id,
                     caption=message.caption,
+                    reply_to_message_id=reply_to_id,
+                    protect_content=private_mode
+                )
+            elif message.video_note:
+                # Forward video note (round video message)
+                sent_message = await bot.send_video_note(
+                    partner_telegram_id,
+                    video_note=message.video_note.file_id,
                     reply_to_message_id=reply_to_id,
                     protect_content=private_mode
                 )
@@ -352,7 +366,7 @@ async def handle_reply_message(message: Message, state: FSMContext):
         break
 
 
-@router.message(F.content_type.in_({ContentType.TEXT, ContentType.VOICE, ContentType.PHOTO, ContentType.VIDEO, ContentType.STICKER, ContentType.ANIMATION}))
+@router.message(F.content_type.in_({ContentType.TEXT, ContentType.VOICE, ContentType.PHOTO, ContentType.VIDEO, ContentType.VIDEO_NOTE, ContentType.STICKER, ContentType.ANIMATION}))
 async def forward_message(message: Message, state: FSMContext):
     """Forward message to chat partner."""
     # Skip dice messages - let game handler process them
@@ -503,19 +517,24 @@ async def forward_message(message: Message, state: FSMContext):
                 )
             elif message.photo:
                 # Forward photo (using file_id) with protect_content based on user's private mode
+                # Support for self-destructing media (has_media_spoiler)
                 sent_message = await bot.send_photo(
                     partner_telegram_id,
                     photo=message.photo[-1].file_id,
                     caption=message.caption,
-                    protect_content=private_mode
+                    protect_content=private_mode,
+                    has_spoiler=getattr(message, 'has_media_spoiler', False) or False
                 )
             elif message.video:
                 # Forward video (using file_id) with protect_content based on user's private mode
+                # Support for self-destructing media (has_media_spoiler)
+                # Note: Timed media effects are preserved automatically by Telegram when using file_id
                 sent_message = await bot.send_video(
                     partner_telegram_id,
                     video=message.video.file_id,
                     caption=message.caption,
-                    protect_content=private_mode
+                    protect_content=private_mode,
+                    has_spoiler=getattr(message, 'has_media_spoiler', False) or False
                 )
             elif message.sticker:
                 # Forward sticker (using file_id) with protect_content based on user's private mode
@@ -530,6 +549,13 @@ async def forward_message(message: Message, state: FSMContext):
                     partner_telegram_id,
                     animation=message.animation.file_id,
                     caption=message.caption,
+                    protect_content=private_mode
+                )
+            elif message.video_note:
+                # Forward video note (round video message)
+                sent_message = await bot.send_video_note(
+                    partner_telegram_id,
+                    video_note=message.video_note.file_id,
                     protect_content=private_mode
                 )
             

@@ -1,6 +1,8 @@
 """
-Game handlers for chat games with coin betting.
-Games: Dice (تاس) and Dart (دارت)
+Game handlers for chat games.
+Games: Dice (تاس), Dart (دارت), Basketball (بسکتبال), Slot Machine (اسلات), 
+Tic-Tac-Toe (دوز), and Rock Paper Scissors (سنگ کاغذ قیچی).
+Games are free - no coin betting.
 """
 import json
 import asyncio
@@ -42,15 +44,12 @@ GAME_TYPE_SLOT_MACHINE = "slot_machine"
 GAME_TYPE_TIC_TAC_TOE = "tic_tac_toe"
 GAME_TYPE_ROCK_PAPER_SCISSORS = "rock_paper_scissors"
 
-# Coin options
-COIN_OPTIONS = [1, 2, 3, 4]
+# Coin options removed - games are now free
 
 
 class GameStates(StatesGroup):
     """FSM states for game."""
     waiting_game_type = State()
-    waiting_coin_amount = State()
-    waiting_game_emoji = State()
 
 
 # Global chat manager instance
@@ -182,25 +181,7 @@ def get_game_type_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
-def get_coin_amount_keyboard() -> InlineKeyboardMarkup:
-    """Get keyboard for selecting coin amount."""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🆓 رایگان", callback_data="game:coin:0"),
-        ],
-        [
-            InlineKeyboardButton(text="1 سکه", callback_data="game:coin:1"),
-            InlineKeyboardButton(text="2 سکه", callback_data="game:coin:2"),
-        ],
-        [
-            InlineKeyboardButton(text="3 سکه", callback_data="game:coin:3"),
-            InlineKeyboardButton(text="4 سکه", callback_data="game:coin:4"),
-        ],
-        [
-            InlineKeyboardButton(text="❌ لغو", callback_data="game:cancel"),
-        ],
-    ])
-    return keyboard
+# Coin amount keyboard removed - games are now free
 
 
 def get_game_request_keyboard(chat_room_id: int) -> InlineKeyboardMarkup:
@@ -245,7 +226,7 @@ async def start_game(message: Message, state: FSMContext):
         
         # Show game type selection
         await message.answer(
-            "🎮 بازی با شرط‌بندی\n\n"
+            "🎮 بازی\n\n"
             "نوع بازی را انتخاب کنید:",
             reply_markup=get_game_type_keyboard()
         )
@@ -275,56 +256,6 @@ async def select_game_type(callback: CallbackQuery, state: FSMContext):
         # Store game type in state
         await state.update_data(game_type=game_type)
         
-        # Get user points to show
-        user_points = await get_user_points(db_session, user.id)
-        
-        # Show coin amount selection
-        game_names = {
-            GAME_TYPE_DICE: "تاس",
-            GAME_TYPE_DART: "دارت",
-            GAME_TYPE_BASKETBALL: "بسکتبال",
-            GAME_TYPE_SLOT_MACHINE: "اسلات",
-            GAME_TYPE_TIC_TAC_TOE: "دوز",
-            GAME_TYPE_ROCK_PAPER_SCISSORS: "سنگ کاغذ قیچی"
-        }
-        game_name = game_names.get(game_type, "بازی")
-        await callback.message.edit_text(
-            f"🎮 بازی {game_name}\n\n"
-            f"💎 سکه‌های فعلی شما: {user_points}\n\n"
-            "تعداد سکه شرط را انتخاب کنید:",
-            reply_markup=get_coin_amount_keyboard()
-        )
-        
-        await state.set_state(GameStates.waiting_coin_amount)
-        await callback.answer()
-        break
-
-
-@router.callback_query(F.data.startswith("game:coin:"), StateFilter(GameStates.waiting_coin_amount))
-async def select_coin_amount(callback: CallbackQuery, state: FSMContext):
-    """Handle coin amount selection and send request to partner."""
-    coin_amount = int(callback.data.split(":")[2])
-    
-    user_id = callback.from_user.id
-    
-    async for db_session in get_db():
-        user = await get_user_by_telegram_id(db_session, user_id)
-        if not user:
-            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
-            return
-        
-        chat_room = await get_active_chat_room_by_user(db_session, user.id)
-        if not chat_room:
-            await callback.answer("❌ شما در حال حاضر یک چت فعال ندارید!", show_alert=True)
-            return
-        
-        # Get game type from state
-        state_data = await state.get_data()
-        game_type = state_data.get("game_type")
-        if not game_type:
-            await callback.answer("❌ خطا در دریافت نوع بازی.", show_alert=True)
-            return
-        
         # Get partner
         partner_id = chat_room.user1_id if chat_room.user2_id == user.id else chat_room.user2_id
         partner = await get_user_by_id(db_session, partner_id)
@@ -332,24 +263,14 @@ async def select_coin_amount(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ مخاطب یافت نشد.", show_alert=True)
             return
         
-        # Check if user has enough coins (only if not free game)
-        if coin_amount > 0:
-            user_points = await get_user_points(db_session, user.id)
-            if user_points < coin_amount:
-                await callback.answer(
-                    f"❌ سکه کافی نداری! شما {user_points} سکه داری و {coin_amount} سکه نیاز داری.",
-                    show_alert=True
-                )
-                return
-        
-        # Store game request in Redis
+        # Store game request in Redis (no coin amount needed)
         game_data = {
             "initiator_id": user.id,
             "initiator_telegram_id": user.telegram_id,
             "partner_id": partner_id,
             "partner_telegram_id": partner.telegram_id,
             "game_type": game_type,
-            "coin_amount": coin_amount,
+            "coin_amount": 0,  # Always 0 - games are free
             "chat_room_id": chat_room.id
         }
         await set_game_request(chat_room.id, game_data)
@@ -367,23 +288,12 @@ async def select_coin_amount(callback: CallbackQuery, state: FSMContext):
         from utils.validators import get_display_name
         user_display_name = get_display_name(user)
         
-        # Get partner points to show
-        partner_points = await get_user_points(db_session, partner_id)
-        
         bot = Bot(token=settings.BOT_TOKEN)
         try:
-            # Format coin amount text
-            if coin_amount == 0:
-                coin_text = "🆓 رایگان"
-            else:
-                coin_text = f"💰 شرط: {coin_amount} سکه"
-            
             await bot.send_message(
                 partner.telegram_id,
                 f"🎮 درخواست بازی\n\n"
-                f"👤 {user_display_name} می‌خواهد با شما بازی {game_name} کند.\n"
-                f"{coin_text}\n"
-                f"💎 سکه‌های فعلی شما: {partner_points}\n\n"
+                f"👤 {user_display_name} می‌خواهد با شما بازی {game_name} کند.\n\n"
                 f"آیا می‌خواهید بازی را بپذیرید؟",
                 reply_markup=get_game_request_keyboard(chat_room.id)
             )
@@ -400,6 +310,9 @@ async def select_coin_amount(callback: CallbackQuery, state: FSMContext):
         await state.clear()
         await callback.answer()
         break
+
+
+# Coin amount selection handler removed - games are now free
 
 
 @router.callback_query(F.data.startswith("game:accept:"))
@@ -425,53 +338,12 @@ async def accept_game_request(callback: CallbackQuery):
             await callback.answer("❌ این درخواست برای شما نیست!", show_alert=True)
             return
         
-        # Check if user has enough coins (only if not free game)
-        coin_amount = game_request["coin_amount"]
-        if coin_amount > 0:
-            user_points = await get_user_points(db_session, user.id)
-            if user_points < coin_amount:
-                await callback.answer(
-                    f"❌ سکه کافی نداری! شما {user_points} سکه داری و {coin_amount} سکه نیاز داری.",
-                    show_alert=True
-                )
-                return
-            
-            # Deduct coins from both users
-            initiator = await get_user_by_id(db_session, game_request["initiator_id"])
-            if not initiator:
-                await callback.answer("❌ کاربر ارسال‌کننده یافت نشد.", show_alert=True)
-                return
-            
-            # Deduct from initiator
-            initiator_points = await get_user_points(db_session, initiator.id)
-            if initiator_points < coin_amount:
-                await callback.answer("❌ کاربر ارسال‌کننده سکه کافی ندارد.", show_alert=True)
-                await delete_game_request(chat_room_id)
-                return
-            
-            # Deduct coins
-            await spend_points(
-                db_session,
-                initiator.id,
-                coin_amount,
-                "spent",
-                "game_bet",
-                f"Bet for {game_request['game_type']} game"
-            )
-            await spend_points(
-                db_session,
-                user.id,
-                coin_amount,
-                "spent",
-                "game_bet",
-                f"Bet for {game_request['game_type']} game"
-            )
-        else:
-            # Free game - no coins deducted
-            initiator = await get_user_by_id(db_session, game_request["initiator_id"])
-            if not initiator:
-                await callback.answer("❌ کاربر ارسال‌کننده یافت نشد.", show_alert=True)
-                return
+        # No coin checking needed - games are free
+        coin_amount = 0  # Always 0 - games are free
+        initiator = await get_user_by_id(db_session, game_request["initiator_id"])
+        if not initiator:
+            await callback.answer("❌ کاربر ارسال‌کننده یافت نشد.", show_alert=True)
+            return
         
         # Create active game
         active_game_data = {
@@ -520,67 +392,28 @@ async def accept_game_request(callback: CallbackQuery):
         
         bot = Bot(token=settings.BOT_TOKEN)
         try:
-            # Get current points before starting game
-            initiator_current_points = await get_user_points(db_session, initiator.id)
-            partner_current_points = await get_user_points(db_session, user.id)
-            
-            # Check if free game
-            is_free_game = coin_amount == 0
-            
             # Handle rock paper scissors differently
             if game_request["game_type"] == GAME_TYPE_ROCK_PAPER_SCISSORS:
                 # Start rock paper scissors game - show selection menu
-                # Format coin text
-                if is_free_game:
-                    coin_text = "🆓 رایگان"
-                else:
-                    coin_text = f"💰 شرط: {coin_amount} سکه"
-                
-                # Send selection menu to both players
                 rps_keyboard = get_rock_paper_scissors_keyboard(chat_room_id)
                 
-                # Message for initiator
-                if is_free_game:
-                    initiator_rps_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n\n"
-                        f"انتخاب خود را انجام دهید:"
-                    )
-                else:
-                    initiator_rps_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n"
-                        f"{coin_text}\n"
-                        f"💎 سکه‌های شما: {initiator_current_points}\n\n"
-                        f"انتخاب خود را انجام دهید:"
-                    )
+                # Message for both players
+                rps_text = (
+                    f"✅ بازی شروع شد!\n\n"
+                    f"🎮 بازی: {game_name}\n\n"
+                    f"انتخاب خود را انجام دهید:"
+                )
                 
                 initiator_rps_msg = await bot.send_message(
                     game_request["initiator_telegram_id"],
-                    initiator_rps_text,
+                    rps_text,
                     reply_markup=rps_keyboard
                 )
                 active_game_data["initiator_message_id"] = initiator_rps_msg.message_id
                 
-                # Message for partner
-                if is_free_game:
-                    partner_rps_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n\n"
-                        f"انتخاب خود را انجام دهید:"
-                    )
-                else:
-                    partner_rps_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n"
-                        f"{coin_text}\n"
-                        f"💎 سکه‌های شما: {partner_current_points}\n\n"
-                        f"انتخاب خود را انجام دهید:"
-                    )
-                
                 partner_rps_msg = await bot.send_message(
                     user.telegram_id,
-                    partner_rps_text,
+                    rps_text,
                     reply_markup=rps_keyboard
                 )
                 active_game_data["partner_message_id"] = partner_rps_msg.message_id
@@ -593,76 +426,45 @@ async def accept_game_request(callback: CallbackQuery):
                 # Start tic-tac-toe game immediately
                 from utils.validators import get_display_name
                 initiator_name = get_display_name(initiator)
-                partner_name = get_display_name(user)
                 
                 # Send board to both players
                 board = active_game_data["board"]
                 current_player_id = active_game_data["current_player_id"]
                 
-                # Format coin text
-                if coin_amount == 0:
-                    coin_text = "🆓 رایگان"
-                else:
-                    coin_text = f"💰 شرط: {coin_amount} سکه"
-                
                 # Board for initiator (X, starts first)
                 initiator_keyboard = get_tic_tac_toe_keyboard(
                     board, current_player_id, initiator.id, chat_room_id
                 )
-                # Format message text
-                if is_free_game:
-                    initiator_start_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n\n"
-                        f"شما ❌ هستید و شروع می‌کنید.\n\n"
-                        f"{format_tic_tac_toe_board_text(board, initiator_name)}"
-                    )
-                else:
-                    initiator_start_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n"
-                        f"{coin_text}\n"
-                        f"💎 سکه‌های شما: {initiator_current_points}\n\n"
-                        f"شما ❌ هستید و شروع می‌کنید.\n\n"
-                        f"{format_tic_tac_toe_board_text(board, initiator_name)}"
-                    )
+                initiator_start_text = (
+                    f"✅ بازی شروع شد!\n\n"
+                    f"🎮 بازی: {game_name}\n\n"
+                    f"شما ❌ هستید و شروع می‌کنید.\n\n"
+                    f"{format_tic_tac_toe_board_text(board, initiator_name)}"
+                )
                 
                 initiator_msg = await bot.send_message(
                     game_request["initiator_telegram_id"],
                     initiator_start_text,
                     reply_markup=initiator_keyboard
                 )
-                # Store message ID
                 active_game_data["initiator_message_id"] = initiator_msg.message_id
                 
                 # Board for partner (O, waits)
                 partner_keyboard = get_tic_tac_toe_keyboard(
                     board, current_player_id, user.id, chat_room_id
                 )
-                # Format message text for partner
-                if is_free_game:
-                    partner_start_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n\n"
-                        f"شما ⭕ هستید. منتظر نوبت خود باشید.\n\n"
-                        f"{format_tic_tac_toe_board_text(board, initiator_name)}"
-                    )
-                else:
-                    partner_start_text = (
-                        f"✅ بازی شروع شد!\n\n"
-                        f"🎮 بازی: {game_name}\n"
-                        f"{coin_text}\n"
-                        f"💎 سکه‌های شما: {partner_current_points}\n\n"
-                        f"شما ⭕ هستید. منتظر نوبت خود باشید.\n\n"
-                        f"{format_tic_tac_toe_board_text(board, initiator_name)}"
-                    )
+                partner_start_text = (
+                    f"✅ بازی شروع شد!\n\n"
+                    f"🎮 بازی: {game_name}\n\n"
+                    f"شما ⭕ هستید. منتظر نوبت خود باشید.\n\n"
+                    f"{format_tic_tac_toe_board_text(board, initiator_name)}"
+                )
                 
                 partner_msg = await bot.send_message(
                     user.telegram_id,
                     partner_start_text,
                     reply_markup=partner_keyboard
                 )
-                # Store message ID
                 active_game_data["partner_message_id"] = partner_msg.message_id
                 
                 # Update active game with message IDs
@@ -680,9 +482,7 @@ async def accept_game_request(callback: CallbackQuery):
                 await bot.send_message(
                     game_request["initiator_telegram_id"],
                     f"✅ بازی پذیرفته شد!\n\n"
-                    f"🎮 بازی: {game_name}\n"
-                    f"💰 شرط: {coin_amount} سکه\n"
-                    f"💎 سکه‌های شما: {initiator_current_points}\n\n"
+                    f"🎮 بازی: {game_name}\n\n"
                     f"🚀 روی دکمه «شروع» کلیک کنید تا ربات تاس را برای شما بفرستد.",
                     reply_markup=game_keyboard_markup
                 )
@@ -691,9 +491,7 @@ async def accept_game_request(callback: CallbackQuery):
                 await bot.send_message(
                     user.telegram_id,
                     f"✅ بازی شروع شد!\n\n"
-                    f"🎮 بازی: {game_name}\n"
-                    f"💰 شرط: {coin_amount} سکه\n"
-                    f"💎 سکه‌های شما: {partner_current_points}\n\n"
+                    f"🎮 بازی: {game_name}\n\n"
                     f"🚀 روی دکمه «شروع» کلیک کنید تا ربات تاس را برای شما بفرستد.",
                     reply_markup=game_keyboard_markup
                 )
@@ -1238,9 +1036,8 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
         initiator = await get_user_by_id(db_session, active_game["initiator_id"])
         partner = await get_user_by_id(db_session, active_game["partner_id"])
         
-        # Calculate winnings (both bet, winner gets both)
-        coin_amount = active_game["coin_amount"]
-        total_winnings = coin_amount * 2
+        # No coin winnings - games are free
+        coin_amount = 0
         
         # Get chat room to check private mode status (needed for keyboard)
         chat_room = None
@@ -1262,95 +1059,38 @@ async def _check_and_complete_game(active_game: dict, db_session, chat_room_id: 
         try:
             if winner_id == active_game["initiator_id"]:
                 # Initiator wins
-                await add_points(
-                    db_session,
-                    initiator.id,
-                    total_winnings,
-                    "earned",
-                    "game_win",
-                    f"Won {active_game['game_type']} game"
-                )
-                # Get final points
-                initiator_final_points = await get_user_points(db_session, initiator.id)
-                partner_final_points = await get_user_points(db_session, partner.id)
-                
                 await bot.send_message(
                     active_game["initiator_telegram_id"],
-                    f"🎉 برنده شدی!\n\n"
-                    f"💰 {total_winnings} سکه برنده شدی!\n"
-                    f"💎 سکه‌های شما: {initiator_final_points}",
+                    f"🎉 برنده شدی!",
                     reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
                 )
                 await bot.send_message(
                     active_game["partner_telegram_id"],
-                    f"😔 باختی!\n\n"
-                    f"💰 {coin_amount} سکه از دست دادی.\n"
-                    f"💎 سکه‌های شما: {partner_final_points}",
+                    f"😔 باختی!",
                     reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
                 )
             elif winner_id == active_game["partner_id"]:
                 # Partner wins
-                await add_points(
-                    db_session,
-                    partner.id,
-                    total_winnings,
-                    "earned",
-                    "game_win",
-                    f"Won {active_game['game_type']} game"
-                )
-                # Get final points
-                initiator_final_points = await get_user_points(db_session, initiator.id)
-                partner_final_points = await get_user_points(db_session, partner.id)
-                
                 await bot.send_message(
                     active_game["partner_telegram_id"],
-                    f"🎉 برنده شدی!\n\n"
-                    f"💰 {total_winnings} سکه برنده شدی!\n"
-                    f"💎 سکه‌های شما: {partner_final_points}",
+                    f"🎉 برنده شدی!",
                     reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
                 )
                 await bot.send_message(
                     active_game["initiator_telegram_id"],
-                    f"😔 باختی!\n\n"
-                    f"💰 {coin_amount} سکه از دست دادی.\n"
-                    f"💎 سکه‌های شما: {initiator_final_points}",
+                    f"😔 باختی!",
                     reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
                 )
             else:
                 # Draw
-                # Refund both users
-                await add_points(
-                    db_session,
-                    initiator.id,
-                    coin_amount,
-                    "earned",
-                    "game_draw",
-                    f"Draw in {active_game['game_type']} game"
-                )
-                await add_points(
-                    db_session,
-                    partner.id,
-                    coin_amount,
-                    "earned",
-                    "game_draw",
-                    f"Draw in {active_game['game_type']} game"
-                )
-                # Get final points
-                initiator_final_points = await get_user_points(db_session, initiator.id)
-                partner_final_points = await get_user_points(db_session, partner.id)
-                
                 await bot.send_message(
                     active_game["initiator_telegram_id"],
-                    f"🤝 مساوی شد!\n\n"
-                    f"💰 سکه‌های شما برگشت داده شد.\n"
-                    f"💎 سکه‌های شما: {initiator_final_points}",
+                    f"🤝 مساوی شد!",
                     reply_markup=get_chat_reply_keyboard(private_mode=initiator_private_mode)
                 )
                 await bot.send_message(
                     active_game["partner_telegram_id"],
-                    f"🤝 مساوی شد!\n\n"
-                    f"💰 سکه‌های شما برگشت داده شد.\n"
-                    f"💎 سکه‌های شما: {partner_final_points}",
+                    f"🤝 مساوی شد!",
                     reply_markup=get_chat_reply_keyboard(private_mode=partner_private_mode)
                 )
         except Exception as e:
@@ -1750,9 +1490,9 @@ async def _handle_tic_tac_toe_game_over(
     import logging
     logger = logging.getLogger(__name__)
     
-    coin_amount = active_game["coin_amount"]
-    total_winnings = coin_amount * 2
-    is_free_game = coin_amount == 0
+    # Games are always free - no coins involved
+    coin_amount = 0
+    is_free_game = True
     
     # Get chat room for private mode
     from db.crud import get_chat_room_by_id
@@ -1769,38 +1509,11 @@ async def _handle_tic_tac_toe_game_over(
     from utils.validators import get_display_name
     
     if winner == "draw":
-        # Draw - refund both (only if not free game)
-        if not is_free_game:
-            await add_points(
-                db_session,
-                initiator.id,
-                coin_amount,
-                "earned",
-                "game_draw",
-                "Draw in tic-tac-toe game"
-            )
-            await add_points(
-                db_session,
-                partner.id,
-                coin_amount,
-                "earned",
-                "game_draw",
-                "Draw in tic-tac-toe game"
-            )
-        
+        # Draw - no coins involved
         final_board_text = format_tic_tac_toe_board_text(board)
-        
-        # Format draw message
-        if is_free_game:
-            draw_message = "🤝 مساوی شد!\n\n🆓 بازی رایگان بود."
-            initiator_draw_text = f"{draw_message}\n\n{final_board_text}"
-            partner_draw_text = f"{draw_message}\n\n{final_board_text}"
-        else:
-            initiator_final_points = await get_user_points(db_session, initiator.id)
-            partner_final_points = await get_user_points(db_session, partner.id)
-            draw_message = f"🤝 مساوی شد!\n\n💰 سکه‌های شما برگشت داده شد."
-            initiator_draw_text = f"{draw_message}\n💎 سکه‌های شما: {initiator_final_points}\n\n{final_board_text}"
-            partner_draw_text = f"{draw_message}\n💎 سکه‌های شما: {partner_final_points}\n\n{final_board_text}"
+        draw_message = "🤝 مساوی شد!"
+        initiator_draw_text = f"{draw_message}\n\n{final_board_text}"
+        partner_draw_text = f"{draw_message}\n\n{final_board_text}"
         
         await bot.send_message(
             active_game["initiator_telegram_id"],
@@ -1829,34 +1542,12 @@ async def _handle_tic_tac_toe_game_over(
             winner_private_mode = partner_private_mode
             loser_private_mode = initiator_private_mode
         
-        # Award winnings (only if not free game)
-        if not is_free_game:
-            await add_points(
-                db_session,
-                winner_id,
-                total_winnings,
-                "earned",
-                "game_win",
-                "Won tic-tac-toe game"
-            )
-        
-        winner_final_points = await get_user_points(db_session, winner_id)
-        loser_final_points = await get_user_points(db_session, loser_id)
-        
+        # No coin winnings - games are free
         final_board_text = format_tic_tac_toe_board_text(board)
-        winner_name = get_display_name(await get_user_by_id(db_session, winner_id))
-        
-        # Format winner message
-        if is_free_game:
-            winner_message = "🎉 برنده شدی!\n\n🆓 بازی رایگان بود."
-            loser_message = "😔 باختی!\n\n🆓 بازی رایگان بود."
-            winner_text = f"{winner_message}\n\n{final_board_text}"
-            loser_text = f"{loser_message}\n\n{final_board_text}"
-        else:
-            winner_message = f"🎉 برنده شدی!\n\n💰 {total_winnings} سکه برنده شدی!"
-            loser_message = f"😔 باختی!\n\n💰 {coin_amount} سکه از دست دادی."
-            winner_text = f"{winner_message}\n💎 سکه‌های شما: {winner_final_points}\n\n{final_board_text}"
-            loser_text = f"{loser_message}\n💎 سکه‌های شما: {loser_final_points}\n\n{final_board_text}"
+        winner_message = "🎉 برنده شدی!"
+        loser_message = "😔 باختی!"
+        winner_text = f"{winner_message}\n\n{final_board_text}"
+        loser_text = f"{loser_message}\n\n{final_board_text}"
         
         await bot.send_message(
             winner_telegram_id,
@@ -1963,6 +1654,15 @@ async def handle_rock_paper_scissors_choice(callback: CallbackQuery):
         # Re-read active_game from Redis to get latest state
         updated_active_game = await get_active_game(chat_room_id)
         if updated_active_game and updated_active_game.get("initiator_value") is not None and updated_active_game.get("partner_value") is not None:
+            # Check if result has already been processed (to avoid duplicate messages)
+            if updated_active_game.get("result_processed", False):
+                # Result already processed by the other player, skip
+                return
+            
+            # Mark as processing to prevent duplicate processing
+            updated_active_game["result_processed"] = True
+            await set_active_game(chat_room_id, updated_active_game)
+            
             # Both have chosen - process result
             await _process_rock_paper_scissors_result(updated_active_game, db_session, chat_room_id)
         
@@ -1999,9 +1699,9 @@ async def _process_rock_paper_scissors_result(active_game: dict, db_session, cha
     initiator = await get_user_by_id(db_session, active_game["initiator_id"])
     partner = await get_user_by_id(db_session, active_game["partner_id"])
     
-    coin_amount = active_game["coin_amount"]
-    total_winnings = coin_amount * 2
-    is_free_game = coin_amount == 0
+    # Games are always free - no coins involved
+    coin_amount = 0
+    is_free_game = True
     
     # Get chat room for private mode
     from db.crud import get_chat_room_by_id
@@ -2020,36 +1720,10 @@ async def _process_rock_paper_scissors_result(active_game: dict, db_session, cha
     bot = Bot(token=settings.BOT_TOKEN)
     try:
         if winner_id is None:
-            # Draw
-            if not is_free_game:
-                await add_points(
-                    db_session,
-                    initiator.id,
-                    coin_amount,
-                    "earned",
-                    "game_draw",
-                    "Draw in rock paper scissors game"
-                )
-                await add_points(
-                    db_session,
-                    partner.id,
-                    coin_amount,
-                    "earned",
-                    "game_draw",
-                    "Draw in rock paper scissors game"
-                )
-            
-            initiator_final_points = await get_user_points(db_session, initiator.id)
-            partner_final_points = await get_user_points(db_session, partner.id)
-            
-            if is_free_game:
-                draw_text = "🤝 مساوی شد!\n\n🆓 بازی رایگان بود."
-                initiator_draw_msg = f"{draw_text}\n\nشما: {initiator_choice}\nحریف: {partner_choice}"
-                partner_draw_msg = f"{draw_text}\n\nشما: {partner_choice}\nحریف: {initiator_choice}"
-            else:
-                draw_text = f"🤝 مساوی شد!\n\n💰 سکه‌های شما برگشت داده شد."
-                initiator_draw_msg = f"{draw_text}\n💎 سکه‌های شما: {initiator_final_points}\n\nشما: {initiator_choice}\nحریف: {partner_choice}"
-                partner_draw_msg = f"{draw_text}\n💎 سکه‌های شما: {partner_final_points}\n\nشما: {partner_choice}\nحریف: {initiator_choice}"
+            # Draw - no coins involved
+            draw_text = "🤝 مساوی شد!"
+            initiator_draw_msg = f"{draw_text}\n\nشما: {initiator_choice}\nحریف: {partner_choice}"
+            partner_draw_msg = f"{draw_text}\n\nشما: {partner_choice}\nحریف: {initiator_choice}"
             
             await bot.send_message(
                 active_game["initiator_telegram_id"],
@@ -2076,25 +1750,9 @@ async def _process_rock_paper_scissors_result(active_game: dict, db_session, cha
                 loser_choice = initiator_choice
                 loser_id = active_game["initiator_id"]
             
-            if not is_free_game:
-                await add_points(
-                    db_session,
-                    winner_id,
-                    total_winnings,
-                    "earned",
-                    "game_win",
-                    "Won rock paper scissors game"
-                )
-            
-            winner_final_points = await get_user_points(db_session, winner_id)
-            loser_final_points = await get_user_points(db_session, loser_id)
-            
-            if is_free_game:
-                winner_msg = f"🎉 برنده شدی!\n\n🆓 بازی رایگان بود.\n\nشما: {winner_choice}\nحریف: {loser_choice}"
-                loser_msg = f"😔 باختی!\n\n🆓 بازی رایگان بود.\n\nشما: {loser_choice}\nحریف: {winner_choice}"
-            else:
-                winner_msg = f"🎉 برنده شدی!\n\n💰 {total_winnings} سکه برنده شدی!\n💎 سکه‌های شما: {winner_final_points}\n\nشما: {winner_choice}\nحریف: {loser_choice}"
-                loser_msg = f"😔 باختی!\n\n💰 {coin_amount} سکه از دست دادی.\n💎 سکه‌های شما: {loser_final_points}\n\nشما: {loser_choice}\nحریف: {winner_choice}"
+            # No coin winnings - games are free
+            winner_msg = f"🎉 برنده شدی!\n\nشما: {winner_choice}\nحریف: {loser_choice}"
+            loser_msg = f"😔 باختی!\n\nشما: {loser_choice}\nحریف: {winner_choice}"
             
             await bot.send_message(
                 winner_telegram_id,

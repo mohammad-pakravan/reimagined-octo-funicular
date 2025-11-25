@@ -1992,20 +1992,10 @@ async def update_user_achievement_progress(
         user_achievement.is_completed = True
         user_achievement.completed_at = datetime.utcnow()
         
-        # Award points if achievement has points reward
-        if achievement.points_reward > 0:
-            await add_points(
-                session,
-                user_id,
-                achievement.points_reward,
-                "earned",
-                "achievement",
-                f"Achievement: {achievement.achievement_name}"
-            )
-        
         # Award badge if achievement has badge
         # Note: Badge notification will be sent by the calling code if needed
         # We don't send notification here to avoid duplicate notifications
+        # Note: Points reward removed - achievements no longer give coins
         if achievement.badge_id:
             await award_badge_to_user(session, user_id, achievement.badge_id)
     
