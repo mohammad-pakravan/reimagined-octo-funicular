@@ -30,6 +30,8 @@ from bot.keyboards.my_profile import (
 from bot.keyboards.reply import get_main_reply_keyboard
 from bot.keyboards.common import get_gender_keyboard, get_delete_account_confirm_keyboard
 from utils.validators import validate_age, parse_age, validate_city, get_display_name
+from utils.user_activity import get_user_status, format_last_seen
+from main import activity_tracker
 
 router = Router()
 
@@ -638,11 +640,16 @@ async def inline_following_list(inline_query: InlineQuery):
                 except Exception:
                     thumbnail_url = None
             
+            # Determine online status
+            _, last_seen = await get_user_status(followed_user.telegram_id, activity_tracker, db_session)
+            status_text = format_last_seen(last_seen if last_seen else followed_user.last_seen)
+            description = f"{status_text} • {user_unique_id}"
+            
             results.append(
                 InlineQueryResultArticle(
                     id=str(followed_user_id),
                     title=f"👥 {display_name_text[:30]}",
-                    description=f"ID: {user_unique_id}",
+                    description=description[:50],
                     thumbnail_url=thumbnail_url,
                     input_message_content=InputTextMessageContent(
                         message_text=user_unique_id
@@ -788,11 +795,16 @@ async def inline_liked_list(inline_query: InlineQuery):
                 except Exception:
                     thumbnail_url = None
             
+            # Determine online status
+            _, last_seen = await get_user_status(liked_user.telegram_id, activity_tracker, db_session)
+            status_text = format_last_seen(last_seen if last_seen else liked_user.last_seen)
+            description = f"{status_text} • {user_unique_id}"
+            
             results.append(
                 InlineQueryResultArticle(
                     id=str(liked_user_id),
                     title=f"❤️ {display_name_text[:30]}",
-                    description=f"ID: {user_unique_id}",
+                    description=description[:50],
                     thumbnail_url=thumbnail_url,
                     input_message_content=InputTextMessageContent(
                         message_text=user_unique_id
@@ -863,11 +875,16 @@ async def inline_blocked_list(inline_query: InlineQuery):
                 except Exception:
                     thumbnail_url = None
             
+            # Determine online status
+            _, last_seen = await get_user_status(blocked_user.telegram_id, activity_tracker, db_session)
+            status_text = format_last_seen(last_seen if last_seen else blocked_user.last_seen)
+            description = f"{status_text} • {user_unique_id}"
+            
             results.append(
                 InlineQueryResultArticle(
                     id=str(blocked_user_id),
                     title=f"🚫 {display_name_text[:30]}",
-                    description=f"ID: {user_unique_id}",
+                    description=description[:50],
                     thumbnail_url=thumbnail_url,
                     input_message_content=InputTextMessageContent(
                         message_text=user_unique_id

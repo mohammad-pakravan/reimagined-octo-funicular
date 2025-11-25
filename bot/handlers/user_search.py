@@ -28,7 +28,7 @@ async def handle_user_search(inline_query: InlineQuery):
         await inline_query.answer(results=[], cache_time=1)
         return
     
-    search_type = parts[1]  # city, province, gender, or online
+    search_type = parts[1]  # city, province, gender, online, samecity, sameprovince
     search_value = parts[2] if len(parts) > 2 else ""
     
     # Get offset from inline_query.offset (Telegram's built-in pagination)
@@ -60,6 +60,18 @@ async def handle_user_search(inline_query: InlineQuery):
         elif search_type == "online":
             online_only = True
             gender = search_value  # online:female or online:male
+        elif search_type == "samecity":
+            if not user.city:
+                await inline_query.answer(results=[], cache_time=1, is_personal=True)
+                return
+            city = user.city
+            gender = search_value or None
+        elif search_type == "sameprovince":
+            if not user.province:
+                await inline_query.answer(results=[], cache_time=1, is_personal=True)
+                return
+            province = user.province
+            gender = search_value or None
         
         # Search users
         users = await search_users(
@@ -134,7 +146,8 @@ async def handle_user_search(inline_query: InlineQuery):
 
             
             # Add online status
-            # description_parts.append(status_text)
+            if status_text:
+                description_parts.append(status_text)
             
             description = " - ".join(description_parts)
             

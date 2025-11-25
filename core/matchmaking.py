@@ -67,6 +67,10 @@ class MatchmakingQueue:
         max_age: Optional[int] = None,
         preferred_city: Optional[str] = None,
         is_premium: bool = False,
+        filter_same_age: bool = False,
+        filter_same_city: bool = False,
+        filter_same_province: bool = False,
+        province: Optional[str] = None,
     ) -> bool:
         """
         Add user to matchmaking queue.
@@ -97,6 +101,10 @@ class MatchmakingQueue:
             "preferred_city": preferred_city,
             "joined_at": time.time(),
             "is_premium": is_premium,
+            "filter_same_age": filter_same_age,
+            "filter_same_city": filter_same_city,
+            "filter_same_province": filter_same_province,
+            "province": province,
         }
         
         user_data_key = self._get_user_data_key(user_id)
@@ -235,6 +243,34 @@ class MatchmakingQueue:
         if not all_candidates:
             return None
         
+        # Helper to check advanced filters
+        def matches_filters(requester: Dict, candidate: Dict) -> bool:
+            """Check advanced filters such as same age/city/province."""
+            # Same age filter (±3 years)
+            if requester.get("filter_same_age"):
+                req_age = requester.get("age")
+                cand_age = candidate.get("age")
+                if req_age is None or cand_age is None:
+                    return False
+                if abs(req_age - cand_age) > 3:
+                    return False
+            
+            # Same city filter
+            if requester.get("filter_same_city"):
+                req_city = requester.get("city")
+                cand_city = candidate.get("city")
+                if not req_city or not cand_city or req_city != cand_city:
+                    return False
+            
+            # Same province filter
+            if requester.get("filter_same_province"):
+                req_province = requester.get("province")
+                cand_province = candidate.get("province")
+                if not req_province or not cand_province or req_province != cand_province:
+                    return False
+            
+            return True
+        
         # Try to find a matching candidate
         for candidate_id in all_candidates:
             candidate_data = await self.get_user_data(candidate_id)
@@ -280,7 +316,7 @@ class MatchmakingQueue:
             if not (user_wants_candidate and candidate_wants_user):
                 continue
             
-            # City filter (optional)
+            # City filter (optional explicit preferred city)
             if preferred_city and candidate_data.get("city") != preferred_city:
                 continue
             
@@ -291,6 +327,12 @@ class MatchmakingQueue:
                     continue
                 if max_age and candidate_age > max_age:
                     continue
+            
+            # Apply advanced filters (both directions)
+            if not matches_filters(user_data, candidate_data):
+                continue
+            if not matches_filters(candidate_data, user_data):
+                continue
             
             # Match found!
             # IMPORTANT: Don't remove user data yet - we need it in connect_users

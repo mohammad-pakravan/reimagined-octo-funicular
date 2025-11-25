@@ -349,47 +349,49 @@ def get_chat_request_keyboard(request_id: int, requester_id: int) -> InlineKeybo
 def get_user_search_keyboard(user) -> InlineKeyboardMarkup:
     """
     Get keyboard for user search options.
-    Each button is in its own row to make them appear larger.
     
     Args:
         user: Current user object
     """
     keyboard = []
     
-    # Each button in its own row for larger appearance
-    # Row 1: All girls
+    # Row 1: General girls/boys search
     keyboard.append([
         InlineKeyboardButton(
-            text="👩 دخترها",
+            text="👨 جستجوی پسر",
+            switch_inline_query_current_chat="search:gender:male"
+        ),
+        InlineKeyboardButton(
+            text="👩 جستجوی دختر",
             switch_inline_query_current_chat="search:gender:female"
         )
     ])
     
-    # Row 2: All boys
-    keyboard.append([
-        InlineKeyboardButton(
-            text="👨 پسرها",
-            switch_inline_query_current_chat="search:gender:male"
-        )
-    ])
-    
-    # Row 3: Same city (only if user has city)
+    # Row 2: Same city (only if user has city)
     if user.city:
         keyboard.append([
             InlineKeyboardButton(
-                text="🏙️ هم شهری‌ها",
-                switch_inline_query_current_chat=f"search:city:{user.city}"
+                text="🌆 پسر همشهری",
+                switch_inline_query_current_chat="search:samecity:male"
+            ),
+            InlineKeyboardButton(
+                text="🌸 دختر همشهری",
+                switch_inline_query_current_chat="search:samecity:female"
             )
         ])
     
-    # Row 4: Same province (only if user has province)
+    # Row 3: Same province (only if user has province)
     if user.province:
         keyboard.append([
             InlineKeyboardButton(
-                text="🗺️ هم استانی‌ها",
-                switch_inline_query_current_chat=f"search:province:{user.province}"
-        )
-    ])
+                text="🧭 پسر هم‌استانی",
+                switch_inline_query_current_chat="search:sameprovince:male"
+            ),
+            InlineKeyboardButton(
+                text="🏞️ دختر هم‌استانی",
+                switch_inline_query_current_chat="search:sameprovince:female"
+            )
+        ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

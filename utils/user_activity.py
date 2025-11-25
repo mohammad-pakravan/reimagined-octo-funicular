@@ -13,7 +13,7 @@ class UserActivityTracker:
     def __init__(self, redis_client: redis.Redis):
         self.redis = redis_client
         self.activity_prefix = "user:activity"
-        self.online_timeout_seconds = 60  # 1 minute considered online
+        self.online_timeout_seconds = 900  # 15 minutes considered online
     
     def _get_activity_key(self, telegram_id: int) -> str:
         """Get Redis key for user activity."""
@@ -100,10 +100,10 @@ async def get_user_status(telegram_id: int, activity_tracker: Optional[UserActiv
             from db.crud import get_user_by_telegram_id
             user = await get_user_by_telegram_id(db_session, telegram_id)
             if user and user.last_seen:
-                # Check if last_seen is within 1 minute
+                # Check if last_seen is within 15 minutes
                 now = datetime.utcnow()
                 time_diff = (now - user.last_seen).total_seconds()
-                is_online = time_diff < 600
+                is_online = time_diff < 900
                 return is_online, user.last_seen
         except Exception:
             pass
@@ -127,8 +127,8 @@ def format_last_seen(last_activity: Optional[datetime]) -> str:
     now = datetime.utcnow()
     time_diff = now - last_activity
     
-    # If within 1 minute, consider online
-    if time_diff.total_seconds() < 60:
+    # If within 15 minutes, consider online
+    if time_diff.total_seconds() < 900:
         return "🟢 آنلاین"
     
     # Format time difference in Persian
