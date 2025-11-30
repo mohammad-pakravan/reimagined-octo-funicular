@@ -92,6 +92,45 @@ def get_admin_users_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_admin_user_search_results_keyboard(users: list, page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
+    """Get keyboard for displaying user search results."""
+    keyboard = []
+    
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    users_page = users[start_idx:end_idx]
+    
+    for user in users_page:
+        from utils.validators import get_display_name
+        display_name = get_display_name(user)
+        status = "🚫" if user.is_banned else "✅"
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{status} {display_name} (ID: {user.id})",
+                callback_data=f"admin:user:view:{user.id}"
+            )
+        ])
+    
+    # Pagination buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ قبلی", callback_data=f"admin:user:search_results:{page-1}"))
+    if end_idx < len(users):
+        nav_buttons.append(InlineKeyboardButton(text="▶️ بعدی", callback_data=f"admin:user:search_results:{page+1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([
+        InlineKeyboardButton(text="🔍 جستجوی مجدد", callback_data="admin:user:search"),
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:users"),
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 def get_admin_referral_links_keyboard() -> InlineKeyboardMarkup:
     """Get admin referral links keyboard."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -325,3 +364,63 @@ def get_mandatory_channel_detail_keyboard(channel_id: int) -> InlineKeyboardMark
         ],
     ])
     return keyboard
+
+
+def get_admin_user_management_keyboard(user_id: int, is_banned: bool = False) -> InlineKeyboardMarkup:
+    """Get keyboard for admin user management actions."""
+    keyboard = []
+    
+    # Ban/Unban button
+    if is_banned:
+        keyboard.append([
+            InlineKeyboardButton(text="🔓 آنبن کردن کاربر", callback_data=f"admin:user:unban:{user_id}"),
+        ])
+    else:
+        keyboard.append([
+            InlineKeyboardButton(text="🚫 بن کردن کاربر", callback_data=f"admin:user:ban:{user_id}"),
+        ])
+    
+    # Edit profile button
+    keyboard.append([
+        InlineKeyboardButton(text="✏️ ویرایش پروفایل", callback_data=f"admin:user:edit:{user_id}"),
+    ])
+    
+    # Back button
+    keyboard.append([
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin:users"),
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_admin_edit_profile_keyboard(user_id: int, has_photo: bool = False) -> InlineKeyboardMarkup:
+    """Get keyboard for editing user profile fields."""
+    keyboard = []
+    
+    keyboard.append([
+        InlineKeyboardButton(text="📝 نام", callback_data=f"admin:user:edit_field:{user_id}:display_name"),
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="⚧️ جنسیت", callback_data=f"admin:user:edit_field:{user_id}:gender"),
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="🎂 سن", callback_data=f"admin:user:edit_field:{user_id}:age"),
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="📍 استان", callback_data=f"admin:user:edit_field:{user_id}:province"),
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="🏙️ شهر", callback_data=f"admin:user:edit_field:{user_id}:city"),
+    ])
+    
+    # Add delete photo button if user has a photo
+    if has_photo:
+        keyboard.append([
+            InlineKeyboardButton(text="🗑️ حذف عکس پروفایل", callback_data=f"admin:user:delete_photo:{user_id}"),
+        ])
+    
+    keyboard.append([
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"admin:user:view:{user_id}"),
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

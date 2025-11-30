@@ -411,16 +411,18 @@ class PointsManager:
             try:
                 # Notify referrer (only if didn't get premium from event)
                 if referrer and not event_reward_given:
-                    try:
-                        await bot.send_message(
-                            referrer.telegram_id,
-                            f"🎉 خبر خوب!\n\n"
-                            f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، عضو ربات شد!\n\n"
-                            f"💰 {coins_referrer_actual} سکه به حساب شما اضافه شد!{referrer_event_info}\n\n"
-                            f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
-                        )
-                    except Exception:
-                        pass
+                    # Check if referrer wants to receive referral notifications
+                    if getattr(referrer, 'receive_referral_notifications', True):
+                        try:
+                            await bot.send_message(
+                                referrer.telegram_id,
+                                f"🎉 خبر خوب!\n\n"
+                                f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، عضو ربات شد!\n\n"
+                                f"💰 {coins_referrer_actual} سکه به حساب شما اضافه شد!{referrer_event_info}\n\n"
+                                f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
+                            )
+                        except Exception:
+                            pass
                 
                 # Notify referred user
                 if referred:

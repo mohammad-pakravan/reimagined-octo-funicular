@@ -197,6 +197,10 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
             if receiver.is_virtual or receiver.telegram_id < 0:
                 # Virtual profiles can't receive messages, skip notification
                 pass
+            # Check if receiver wants to receive direct messages
+            elif not getattr(receiver, 'receive_direct_messages', True):
+                # User has disabled direct message notifications
+                pass
             else:
                 await bot.send_message(
                     receiver.telegram_id,
@@ -204,9 +208,9 @@ async def confirm_dm_send(callback: CallbackQuery, state: FSMContext):
                     f"👤 نام: {get_display_name(user)}\n"
                     f"⚧️ جنسیت: {gender_text}\n"
                     f"🆔 ID: {user_profile_id}\n\n"
-                f"برای مشاهده پیام از دکمه زیر استفاده کن:",
-                reply_markup=get_dm_receive_keyboard(dm.id)
-            )
+                    f"برای مشاهده پیام از دکمه زیر استفاده کن:",
+                    reply_markup=get_dm_receive_keyboard(dm.id)
+                )
             await bot.session.close()
         except Exception as e:
             # If bot can't send message (user blocked bot, etc.), still save the message

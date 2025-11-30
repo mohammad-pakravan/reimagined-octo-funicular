@@ -1,6 +1,7 @@
 """
 My profile handler for editing own profile and managing follows/blocks.
 """
+from datetime import datetime
 from aiogram import Router, F
 from aiogram import Bot
 from aiogram.types import Message, CallbackQuery, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputTextMessageContent, InputMessageContent
@@ -27,6 +28,7 @@ from bot.keyboards.my_profile import (
     get_blocked_list_keyboard,
     get_liked_list_keyboard,
 )
+from bot.keyboards.notification_settings import get_notification_settings_keyboard
 from bot.keyboards.reply import get_main_reply_keyboard
 from bot.keyboards.common import get_gender_keyboard, get_delete_account_confirm_keyboard
 from utils.validators import validate_age, parse_age, validate_city, get_display_name
@@ -1260,4 +1262,150 @@ async def delete_account_cancel(callback: CallbackQuery):
         "اکانت شما همچنان فعال است."
     )
     await callback.answer("✅ لغو شد")
+
+
+@router.callback_query(F.data == "my_profile:notification_settings")
+async def show_notification_settings(callback: CallbackQuery):
+    """Show notification settings menu."""
+    user_id = callback.from_user.id
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        # Get current settings (default to True if not set)
+        receive_chat_requests = getattr(user, 'receive_chat_requests', True)
+        receive_direct_messages = getattr(user, 'receive_direct_messages', True)
+        receive_referral_notifications = getattr(user, 'receive_referral_notifications', True)
+        
+        settings_text = (
+            "⚙️ تنظیمات اعلان‌ها\n\n"
+            "می‌توانید انتخاب کنید که چه نوع پیام‌هایی را دریافت کنید:\n\n"
+            f"💬 درخواست‌های چت: {'✅ فعال' if receive_chat_requests else '❌ غیرفعال'}\n"
+            f"✉️ پیام‌های دایرکت: {'✅ فعال' if receive_direct_messages else '❌ غیرفعال'}\n"
+            f"🎁 اعلان‌های معرفی: {'✅ فعال' if receive_referral_notifications else '❌ غیرفعال'}\n\n"
+            "💡 روی هر گزینه کلیک کنید تا فعال/غیرفعال شود."
+        )
+        
+        # Check if message has photo, if so use edit_caption, otherwise edit_text
+        try:
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=settings_text,
+                    reply_markup=get_notification_settings_keyboard(
+                        receive_chat_requests=receive_chat_requests,
+                        receive_direct_messages=receive_direct_messages,
+                        receive_referral_notifications=receive_referral_notifications
+                    )
+                )
+            else:
+                await callback.message.edit_text(
+                    settings_text,
+                    reply_markup=get_notification_settings_keyboard(
+                        receive_chat_requests=receive_chat_requests,
+                        receive_direct_messages=receive_direct_messages,
+                        receive_referral_notifications=receive_referral_notifications
+                    )
+                )
+        except Exception:
+            await callback.message.answer(
+                settings_text,
+                reply_markup=get_notification_settings_keyboard(
+                    receive_chat_requests=receive_chat_requests,
+                    receive_direct_messages=receive_direct_messages,
+                    receive_referral_notifications=receive_referral_notifications
+                )
+            )
+        
+        await callback.answer()
+        break
+
+
+@router.callback_query(F.data.startswith("notification:toggle:"))
+async def toggle_notification_setting(callback: CallbackQuery):
+    """Toggle a notification setting."""
+    user_id = callback.from_user.id
+    setting_type = callback.data.split(":")[-1]
+    
+    async for db_session in get_db():
+        user = await get_user_by_telegram_id(db_session, user_id)
+        if not user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        
+        # Toggle the setting
+        if setting_type == "chat_requests":
+            user.receive_chat_requests = not getattr(user, 'receive_chat_requests', True)
+            new_value = user.receive_chat_requests
+        elif setting_type == "direct_messages":
+            user.receive_direct_messages = not getattr(user, 'receive_direct_messages', True)
+            new_value = user.receive_direct_messages
+        elif setting_type == "referral_notifications":
+            user.receive_referral_notifications = not getattr(user, 'receive_referral_notifications', True)
+            new_value = user.receive_referral_notifications
+        else:
+            await callback.answer("❌ تنظیمات نامعتبر.", show_alert=True)
+            return
+        
+        user.updated_at = datetime.utcnow()
+        await db_session.commit()
+        await db_session.refresh(user)
+        
+        # Get all settings for display
+        receive_chat_requests = getattr(user, 'receive_chat_requests', True)
+        receive_direct_messages = getattr(user, 'receive_direct_messages', True)
+        receive_referral_notifications = getattr(user, 'receive_referral_notifications', True)
+        
+        setting_names = {
+            "chat_requests": "درخواست‌های چت",
+            "direct_messages": "پیام‌های دایرکت",
+            "referral_notifications": "اعلان‌های معرفی"
+        }
+        
+        setting_name = setting_names.get(setting_type, setting_type)
+        status_text = "فعال شد" if new_value else "غیرفعال شد"
+        
+        settings_text = (
+            "⚙️ تنظیمات اعلان‌ها\n\n"
+            "می‌توانید انتخاب کنید که چه نوع پیام‌هایی را دریافت کنید:\n\n"
+            f"💬 درخواست‌های چت: {'✅ فعال' if receive_chat_requests else '❌ غیرفعال'}\n"
+            f"✉️ پیام‌های دایرکت: {'✅ فعال' if receive_direct_messages else '❌ غیرفعال'}\n"
+            f"🎁 اعلان‌های معرفی: {'✅ فعال' if receive_referral_notifications else '❌ غیرفعال'}\n\n"
+            "💡 روی هر گزینه کلیک کنید تا فعال/غیرفعال شود."
+        )
+        
+        # Check if message has photo, if so use edit_caption, otherwise edit_text
+        try:
+            if callback.message.photo:
+                await callback.message.edit_caption(
+                    caption=settings_text,
+                    reply_markup=get_notification_settings_keyboard(
+                        receive_chat_requests=receive_chat_requests,
+                        receive_direct_messages=receive_direct_messages,
+                        receive_referral_notifications=receive_referral_notifications
+                    )
+                )
+            else:
+                await callback.message.edit_text(
+                    settings_text,
+                    reply_markup=get_notification_settings_keyboard(
+                        receive_chat_requests=receive_chat_requests,
+                        receive_direct_messages=receive_direct_messages,
+                        receive_referral_notifications=receive_referral_notifications
+                    )
+                )
+        except Exception:
+            await callback.message.answer(
+                settings_text,
+                reply_markup=get_notification_settings_keyboard(
+                    receive_chat_requests=receive_chat_requests,
+                    receive_direct_messages=receive_direct_messages,
+                    receive_referral_notifications=receive_referral_notifications
+                )
+            )
+        
+        await callback.answer(f"✅ {setting_name} {status_text}")
+        break
 

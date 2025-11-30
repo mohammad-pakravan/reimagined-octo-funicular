@@ -669,13 +669,45 @@ async def delete_user_account(session: AsyncSession, user_id: int) -> bool:
     
     logger.info(f"Deleting account for user {user_id} (telegram_id: {user.telegram_id}), current is_active: {user.is_active}, is_banned: {user.is_banned}")
     
+    # Delete profile image from MinIO if it exists and is a MinIO URL
+    if user.profile_image_url:
+        # Check if it's a MinIO URL (starts with http:// or https://)
+        if user.profile_image_url.startswith(('http://', 'https://')):
+            try:
+                from utils.minio_storage import delete_image_from_minio
+                from config.settings import settings
+                import urllib.parse
+                
+                # Extract filename from URL
+                # URL format: {MINIO_PUBLIC_URL}/{BUCKET_NAME}/{filename}
+                parsed_url = urllib.parse.urlparse(user.profile_image_url)
+                path_parts = parsed_url.path.strip('/').split('/')
+                
+                # If path has at least 2 parts (bucket and filename)
+                if len(path_parts) >= 2:
+                    # Last part is the filename
+                    filename = path_parts[-1]
+                    # Try to delete from MinIO
+                    if delete_image_from_minio(filename):
+                        logger.info(f"Successfully deleted profile image from MinIO for user {user_id}: {filename}")
+                    else:
+                        logger.warning(f"Failed to delete profile image from MinIO for user {user_id}: {filename}")
+                else:
+                    logger.warning(f"Could not extract filename from profile_image_url for user {user_id}: {user.profile_image_url}")
+            except Exception as e:
+                logger.error(f"Error deleting profile image from MinIO for user {user_id}: {e}", exc_info=True)
+        else:
+            # It's a Telegram file_id, no need to delete from MinIO
+            logger.info(f"Profile image for user {user_id} is a Telegram file_id, skipping MinIO deletion")
+    
     # Use direct UPDATE statement to ensure the change is applied
+    # Only set is_active=False and profile_image_url=None, don't change is_banned (that's for admin bans)
     result = await session.execute(
         update(User)
         .where(User.id == user_id)
         .values(
             is_active=False,
-            is_banned=True,
+            profile_image_url=None,
             updated_at=datetime.utcnow()
         )
     )
@@ -727,6 +759,58 @@ async def get_user_count(session: AsyncSession) -> int:
     """Get total user count."""
     result = await session.execute(select(func.count(User.id)))
     return result.scalar() or 0
+
+
+async def search_users_by_name(
+    session: AsyncSession,
+    name_query: str,
+    limit: int = 50,
+    offset: int = 0
+) -> List[User]:
+    """
+    Search users by display name or username.
+    
+    Args:
+        session: Database session
+        name_query: Search query (searches in display_name and username)
+        limit: Maximum number of results
+        offset: Number of results to skip
+        
+    Returns:
+        List of User objects matching the search query
+    """
+    from sqlalchemy import or_, func
+    
+    # Use LIKE for case-insensitive search with LOWER
+    search_pattern = f"%{name_query}%"
+    search_lower = name_query.lower()
+    
+    # Build conditions for display_name and username (handle NULL values)
+    from sqlalchemy import and_
+    conditions = []
+    
+    # Check display_name (if not NULL and not empty)
+    conditions.append(
+        and_(
+            User.display_name.isnot(None),
+            func.lower(User.display_name).like(f"%{search_lower}%")
+        )
+    )
+    
+    # Check username (if not NULL and not empty)
+    conditions.append(
+        and_(
+            User.username.isnot(None),
+            func.lower(User.username).like(f"%{search_lower}%")
+        )
+    )
+    
+    query = select(User).where(
+        or_(*conditions)
+    ).offset(offset).limit(limit)
+    
+    result = await session.execute(query)
+    return list(result.scalars().all())
 
 
 # ============= ChatRoom CRUD =============

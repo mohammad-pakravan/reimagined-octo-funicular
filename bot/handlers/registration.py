@@ -322,6 +322,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
         # Check if user came from user referral link
         referral_code = user_data.get("referral_code")
         referral_code_obj = None
+        has_referral_link = False
         if referral_code:
             from db.crud import get_referral_code_by_code, create_referral, get_coins_for_activity
             referral_code_obj = await get_referral_code_by_code(db_session, referral_code)
@@ -344,11 +345,7 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                         referral_code,
                         check_telegram_id=user_id
                 )
-                
-                await message.answer(
-                    f"✅ عضویت شما از طریق لینک دعوت ثبت شد!\n\n"
-                    f"💡 با تکمیل پروفایل خود (اسم، سن، شهر، تصویر)، سکه دریافت می‌کنی!"
-                )
+                    has_referral_link = True
         
         # Check if profile is complete (username, age, city, profile_image_url)
         profile_complete = (
@@ -357,6 +354,11 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
             user.city and
             user.profile_image_url
         )
+        
+        # Variables to build final message
+        final_message_parts = []
+        coins_received = 0
+        referred_event_info = ""
         
         # If profile is complete and user has a referral, award profile completion points
         # Only for new users who registered with referral link
@@ -463,35 +465,44 @@ async def complete_registration(message: Message, state: FSMContext, user_id: in
                     # Notify referrer
                     referrer = await get_user_by_id(db_session, referral_code_obj.user_id)
                     if referrer:
-                        from aiogram import Bot
-                        bot = Bot(token=settings.BOT_TOKEN)
-                        try:
-                            await bot.send_message(
-                                referrer.telegram_id,
-                                f"🎉 خبر خوب!\n\n"
-                                f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، پروفایلش را تکمیل کرد!\n\n"
-                                f"💰 {coins_profile_complete_actual} سکه به حساب شما اضافه شد!{referrer_event_info}\n\n"
-                                f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
-                            )
-                        except Exception:
-                            pass
-                        finally:
-                            await bot.session.close()
+                        # Check if referrer wants to receive referral notifications
+                        if getattr(referrer, 'receive_referral_notifications', True):
+                            from aiogram import Bot
+                            bot = Bot(token=settings.BOT_TOKEN)
+                            try:
+                                await bot.send_message(
+                                    referrer.telegram_id,
+                                    f"🎉 خبر خوب!\n\n"
+                                    f"✅ یکی از کاربرانی که از لینک دعوت شما استفاده کرده، پروفایلش را تکمیل کرد!\n\n"
+                                    f"💰 {coins_profile_complete_actual} سکه به حساب شما اضافه شد!{referrer_event_info}\n\n"
+                                    f"💡 با دعوت کاربران بیشتر، سکه بیشتری دریافت می‌کنی!"
+                                )
+                            except Exception:
+                                pass
+                            finally:
+                                await bot.session.close()
                     
-                    # Notify referred user
-                        await message.answer(
-                        f"🎉 تبریک!\n\n"
-                        f"✅ پروفایل شما تکمیل شد!\n\n"
-                        f"💰 {coins_referred_actual} سکه به حساب شما اضافه شد!{referred_event_info}\n\n"
-                        f"💡 با تکمیل پروفایل، سکه دریافت کردی!"
-                    )
+                    # Store info for final message
+                    coins_received = coins_referred_actual
+                    referred_event_info = referred_event_info
         
         # Clear registration data
         registration_data.pop(user_id, None)
         
+        # Build final combined message
+        final_message_parts.append("✅ ثبت نام تکمیل شد!")
+        
+        if has_referral_link:
+            final_message_parts.append("\n✅ عضویت شما از طریق لینک دعوت ثبت شد!")
+        
+        if profile_complete and coins_received > 0:
+            final_message_parts.append(f"\n\n🎉 تبریک! پروفایل شما تکمیل شد!")
+            final_message_parts.append(f"\n💰 {coins_received} سکه به حساب شما اضافه شد!{referred_event_info}")
+        
+        final_message_parts.append("\n\n💡 پروفایل شما ایجاد شده است. حالا می‌تونی شروع به چت کنی!")
+        
         await message.answer(
-            "✅ ثبت نام تکمیل شد!\n\n"
-            "پروفایل شما ایجاد شده است. حالا می‌تونی شروع به چت کنی!",
+            "".join(final_message_parts),
             reply_markup=get_main_reply_keyboard()
         )
         

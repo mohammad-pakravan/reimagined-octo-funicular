@@ -32,6 +32,9 @@ def get_my_profile_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✉️ پیام‌های دایرکت", callback_data="my_profile:direct_messages"),
         ],
         [
+            InlineKeyboardButton(text="⚙️ تنظیمات اعلان‌ها", callback_data="my_profile:notification_settings"),
+        ],
+        [
             InlineKeyboardButton(text="🎵 پلی‌لیست من", callback_data="playlist:view"),
         ],
         [

@@ -100,16 +100,27 @@ async def view_user_profile(message: Message):
             f"فاصله : {distance}"
         )
         
-        # Get profile keyboard
-        from bot.keyboards.profile import get_profile_keyboard
-        profile_keyboard = get_profile_keyboard(
-            partner_id=profile_user.id,
-            is_liked=is_liked_status,
-            is_following=is_following_status,
-            is_blocked=is_blocked_status,
-            like_count=profile_user.like_count or 0,
-            is_notifying=is_notifying_status
-        )
+        # Check if current user is admin
+        from config.settings import settings
+        is_admin_user = user_id in settings.ADMIN_IDS
+        
+        # Get profile keyboard - use admin keyboard if admin, otherwise normal keyboard
+        if is_admin_user:
+            from bot.keyboards.admin import get_admin_user_management_keyboard
+            profile_keyboard = get_admin_user_management_keyboard(
+                user_id=profile_user.id,
+                is_banned=profile_user.is_banned or False
+            )
+        else:
+            from bot.keyboards.profile import get_profile_keyboard
+            profile_keyboard = get_profile_keyboard(
+                partner_id=profile_user.id,
+                is_liked=is_liked_status,
+                is_following=is_following_status,
+                is_blocked=is_blocked_status,
+                like_count=profile_user.like_count or 0,
+                is_notifying=is_notifying_status
+            )
         
         # Send profile with photo if available
         profile_image_url = getattr(profile_user, 'profile_image_url', None)
@@ -248,16 +259,27 @@ async def view_user_profile_regex(message: Message):
             f"فاصله : {distance}"
         )
         
-        # Get profile keyboard
-        from bot.keyboards.profile import get_profile_keyboard
-        profile_keyboard = get_profile_keyboard(
-            partner_id=profile_user.id,
-            is_liked=is_liked_status,
-            is_following=is_following_status,
-            is_blocked=is_blocked_status,
-            like_count=profile_user.like_count or 0,
-            is_notifying=is_notifying_status
-        )
+        # Check if current user is admin
+        from config.settings import settings
+        is_admin_user = user_id in settings.ADMIN_IDS
+        
+        # Get profile keyboard - use admin keyboard if admin, otherwise normal keyboard
+        if is_admin_user:
+            from bot.keyboards.admin import get_admin_user_management_keyboard
+            profile_keyboard = get_admin_user_management_keyboard(
+                user_id=profile_user.id,
+                is_banned=profile_user.is_banned or False
+            )
+        else:
+            from bot.keyboards.profile import get_profile_keyboard
+            profile_keyboard = get_profile_keyboard(
+                partner_id=profile_user.id,
+                is_liked=is_liked_status,
+                is_following=is_following_status,
+                is_blocked=is_blocked_status,
+                like_count=profile_user.like_count or 0,
+                is_notifying=is_notifying_status
+            )
         
         # Send profile with photo if available
         profile_image_url = getattr(profile_user, 'profile_image_url', None)

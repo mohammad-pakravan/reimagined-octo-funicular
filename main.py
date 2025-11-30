@@ -41,6 +41,7 @@ import bot.handlers.coin_package_admin as coin_package_admin
 import bot.handlers.coin_purchase as coin_purchase
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.middlewares.channel_check import ChannelCheckMiddleware
+from bot.middlewares.ban_check import BanCheckMiddleware
 
 # Import API
 from api.video_call import app as fastapi_app, set_redis_client as set_api_redis
@@ -209,6 +210,9 @@ async def setup_bot():
     asyncio.create_task(run_broadcast_processor(dp['broadcast_processor']))
     
     # Register middlewares
+    # Ban check should be first to block banned users immediately
+    dp.message.middleware(BanCheckMiddleware())
+    dp.callback_query.middleware(BanCheckMiddleware())
     dp.message.middleware(RateLimitMiddleware(rate_limiter))
     dp.callback_query.middleware(RateLimitMiddleware(rate_limiter))
     dp.message.middleware(ChannelCheckMiddleware())
@@ -226,6 +230,10 @@ async def setup_bot():
     dp.include_router(premium.router)
     import bot.handlers.admin as admin_handler
     dp.include_router(admin_handler.router)  # Admin handlers
+    import bot.handlers.admin_user_management as admin_user_mgmt
+    dp.include_router(admin_user_mgmt.router)  # Admin user management handlers
+    import bot.handlers.admin_user_search as admin_user_search
+    dp.include_router(admin_user_search.router)  # Admin user search handlers
     import bot.handlers.mandatory_channels as mandatory_channels
     dp.include_router(mandatory_channels.router)  # Mandatory channels handlers
     dp.include_router(profile.router)  # Profile interaction handlers

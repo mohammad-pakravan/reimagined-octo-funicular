@@ -65,6 +65,7 @@ from db.crud import (
     update_mandatory_channel,
     delete_mandatory_channel,
     get_active_mandatory_channels,
+    search_users_by_name,
 )
 from db.models import User
 from bot.keyboards.common import get_admin_keyboard, get_main_menu_keyboard
@@ -178,6 +179,17 @@ class MandatoryChannelStates(StatesGroup):
     waiting_channel_name = State()
     waiting_channel_link = State()
     waiting_order_index = State()
+
+
+class EditUserProfileStates(StatesGroup):
+    """FSM states for editing user profile."""
+    waiting_field_value = State()
+    waiting_admin_message = State()
+
+
+class AdminUserSearchStates(StatesGroup):
+    """FSM states for admin user search."""
+    waiting_name = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -997,17 +1009,27 @@ async def list_referral_links_pagination(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin:user:search")
 async def admin_user_search_start(callback: CallbackQuery, state: FSMContext):
-    """Start user search."""
+    """Start user search by name."""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ دسترسی محدود است.", show_alert=True)
         return
     
-    await callback.message.edit_text(
-        "🔍 جستجوی کاربر\n\n"
-        "لطفاً ID کاربر، نام کاربری، یا Telegram ID را وارد کنید:"
+    message_text = (
+        "🔍 جستجوی کاربر بر اساس نام\n\n"
+        "لطفاً نام کاربر را وارد کنید (نام نمایشی یا نام کاربری):"
     )
+    
+    # Check if message has photo, if so use edit_caption, otherwise edit_text
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=message_text)
+        else:
+            await callback.message.edit_text(message_text)
+    except Exception:
+        await callback.message.answer(message_text)
+    
+    await state.set_state(AdminUserSearchStates.waiting_name)
     await callback.answer()
-    # State will be handled in message handler
 
 
 @router.callback_query(F.data == "admin:users:banned")
@@ -2279,17 +2301,27 @@ async def list_referral_links_pagination(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin:user:search")
 async def admin_user_search_start(callback: CallbackQuery, state: FSMContext):
-    """Start user search."""
+    """Start user search by name."""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ دسترسی محدود است.", show_alert=True)
         return
     
-    await callback.message.edit_text(
-        "🔍 جستجوی کاربر\n\n"
-        "لطفاً ID کاربر، نام کاربری، یا Telegram ID را وارد کنید:"
+    message_text = (
+        "🔍 جستجوی کاربر بر اساس نام\n\n"
+        "لطفاً نام کاربر را وارد کنید (نام نمایشی یا نام کاربری):"
     )
+    
+    # Check if message has photo, if so use edit_caption, otherwise edit_text
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=message_text)
+        else:
+            await callback.message.edit_text(message_text)
+    except Exception:
+        await callback.message.answer(message_text)
+    
+    await state.set_state(AdminUserSearchStates.waiting_name)
     await callback.answer()
-    # State will be handled in message handler
 
 
 @router.callback_query(F.data == "admin:users:banned")
@@ -2784,17 +2816,27 @@ async def list_referral_links_pagination(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin:user:search")
 async def admin_user_search_start(callback: CallbackQuery, state: FSMContext):
-    """Start user search."""
+    """Start user search by name."""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ دسترسی محدود است.", show_alert=True)
         return
     
-    await callback.message.edit_text(
-        "🔍 جستجوی کاربر\n\n"
-        "لطفاً ID کاربر، نام کاربری، یا Telegram ID را وارد کنید:"
+    message_text = (
+        "🔍 جستجوی کاربر بر اساس نام\n\n"
+        "لطفاً نام کاربر را وارد کنید (نام نمایشی یا نام کاربری):"
     )
+    
+    # Check if message has photo, if so use edit_caption, otherwise edit_text
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=message_text)
+        else:
+            await callback.message.edit_text(message_text)
+    except Exception:
+        await callback.message.answer(message_text)
+    
+    await state.set_state(AdminUserSearchStates.waiting_name)
     await callback.answer()
-    # State will be handled in message handler
 
 
 @router.callback_query(F.data == "admin:users:banned")

@@ -68,6 +68,11 @@ class User(Base):
     # Chat filter preferences (default settings)
     default_chat_filter_same_age = Column(Boolean, default=True, nullable=False)  # Default: filter by same age (±3 years)
     
+    # Notification preferences
+    receive_chat_requests = Column(Boolean, default=True, nullable=False)  # Receive chat request notifications
+    receive_direct_messages = Column(Boolean, default=True, nullable=False)  # Receive direct message notifications
+    receive_referral_notifications = Column(Boolean, default=True, nullable=False)  # Receive referral notifications
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -303,6 +303,10 @@ async def confirm_chat_request_send(callback: CallbackQuery, state: FSMContext):
             if receiver.is_virtual or receiver.telegram_id < 0:
                 # Virtual profiles can't receive chat requests, skip notification
                 pass
+            # Check if receiver wants to receive chat requests
+            elif not getattr(receiver, 'receive_chat_requests', True):
+                # User has disabled chat request notifications
+                pass
             else:
                 # Send message with photo if available
                 if user.profile_image_url:

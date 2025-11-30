@@ -351,16 +351,18 @@ async def confirm_dm_reply_send(callback: CallbackQuery, state: FSMContext):
             # Get user profile ID
             user_profile_id = f"/user_{user.profile_id}"
             
-            # Send notification like a regular direct message
-            await bot.send_message(
-                sender.telegram_id,
-                f"✉️ یک پیام دایرکت از {get_display_name(user)} داری!\n\n"
-                f"👤 نام: {get_display_name(user)}\n"
-                f"⚧️ جنسیت: {gender_text}\n"
-                f"🆔 ID: {user_profile_id}\n\n"
-                f"برای مشاهده پیام از دکمه زیر استفاده کن:",
-                reply_markup=get_dm_receive_keyboard(dm.id)
-            )
+            # Check if sender wants to receive direct messages
+            if getattr(sender, 'receive_direct_messages', True):
+                # Send notification like a regular direct message
+                await bot.send_message(
+                    sender.telegram_id,
+                    f"✉️ یک پیام دایرکت از {get_display_name(user)} داری!\n\n"
+                    f"👤 نام: {get_display_name(user)}\n"
+                    f"⚧️ جنسیت: {gender_text}\n"
+                    f"🆔 ID: {user_profile_id}\n\n"
+                    f"برای مشاهده پیام از دکمه زیر استفاده کن:",
+                    reply_markup=get_dm_receive_keyboard(dm.id)
+                )
             await bot.session.close()
         except Exception as e:
             # If bot can't send message, still save the message
