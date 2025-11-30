@@ -194,6 +194,13 @@ async def process_display_name(message: Message, state: FSMContext):
         await message.answer("❌ نام نمایشی نمی‌تواند بیشتر از 50 کاراکتر باشد.\n\nلطفاً دوباره نام نمایشی خودت را بفرست:")
         return
     
+    # Check for inappropriate content
+    from utils.content_filter import validate_display_name
+    is_valid, error_message = validate_display_name(display_name)
+    if not is_valid:
+        await message.answer(error_message + "\n\nلطفاً دوباره نام نمایشی خودت را بفرست:")
+        return
+    
     # Store display name
     if user_id not in registration_data:
         registration_data[user_id] = {}
@@ -217,6 +224,7 @@ async def process_photo(message: Message, state: FSMContext):
     
     # Upload photo to MinIO
     from utils.minio_storage import upload_telegram_photo_to_minio
+    from utils.nsfw_detector import download_and_check_photo
     from aiogram import Bot
     from config.settings import settings
     import logging
@@ -224,6 +232,12 @@ async def process_photo(message: Message, state: FSMContext):
     
     bot = Bot(token=settings.BOT_TOKEN)
     try:
+        # Check for NSFW content before uploading
+        is_safe, error_message = await download_and_check_photo(bot, file_id)
+        if not is_safe:
+            await message.answer(error_message)
+            return
+        
         # Use telegram_id for filename generation (user may not exist in DB yet)
         minio_url = await upload_telegram_photo_to_minio(bot, file_id, user_id)
         if not minio_url:

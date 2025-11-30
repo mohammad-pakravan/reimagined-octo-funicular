@@ -330,11 +330,19 @@ async def process_new_photo(message: Message, state: FSMContext):
         
         # Upload photo to MinIO
         from utils.minio_storage import upload_telegram_photo_to_minio
+        from utils.nsfw_detector import download_and_check_photo
         from aiogram import Bot
         from config.settings import settings
         
         bot = Bot(token=settings.BOT_TOKEN)
         try:
+            # Check for NSFW content before uploading
+            is_safe, error_message = await download_and_check_photo(bot, file_id)
+            if not is_safe:
+                await message.answer(error_message)
+                await state.clear()
+                return
+            
             minio_url = await upload_telegram_photo_to_minio(bot, file_id, user.id)
             if not minio_url:
                 await message.answer("❌ خطا در آپلود عکس. لطفاً دوباره تلاش کنید.")
@@ -561,6 +569,13 @@ async def process_new_display_name(message: Message, state: FSMContext):
     
     if len(new_display_name) < 2:
         await message.answer("❌ نام نمایشی باید حداقل 2 کاراکتر باشد.\n\nلطفاً دوباره نام نمایشی را بفرستید:")
+        return
+    
+    # Check for inappropriate content
+    from utils.content_filter import validate_display_name
+    is_valid, error_message = validate_display_name(new_display_name)
+    if not is_valid:
+        await message.answer(error_message + "\n\nلطفاً دوباره نام نمایشی را بفرستید:")
         return
     
     async for db_session in get_db():

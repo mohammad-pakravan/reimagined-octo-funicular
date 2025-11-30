@@ -33,6 +33,7 @@ services:
       - ./db/migration_add_engagement_features.sql:/docker-entrypoint-initdb.d/migration_add_engagement_features.sql
       - ./db/migration_add_admin_features.sql:/docker-entrypoint-initdb.d/migration_add_admin_features.sql
       - ./db/migration_add_last_seen.sql:/docker-entrypoint-initdb.d/migration_add_last_seen.sql
+      - ./db/migration_add_notification_settings.sql:/docker-entrypoint-initdb.d/migration_add_notification_settings.sql
     restart: unless-stopped
     networks:
       - telecaht_network
