@@ -118,10 +118,12 @@ async def search_users(
         # Sort online users:
         # 1. last_seen DESC (newest visit first)
         # 2. created_at DESC (newest user first)
+        # 3. user.id ASC (tie-breaker for stable sorting)
         online_candidates.sort(
             key=lambda x: (
                 -(x[1].timestamp() if x[1] else 0),   # last_seen DESC
-                -(x[2].timestamp() if x[2] else 0)    # created_at DESC
+                -(x[2].timestamp() if x[2] else 0),   # created_at DESC
+                x[0].id  # user.id ASC (tie-breaker for stable sorting)
             )
         )
         
@@ -145,10 +147,12 @@ async def search_users(
         # Sort priority:
         # 1. last_seen DESC (newest visit first) - users with recent activity first
         # 2. created_at DESC (newest user first) - if last_seen is same or None, newest users first
+        # 3. user.id ASC (tie-breaker for stable sorting)
         processed.sort(
             key=lambda x: (
                 -(x[1].timestamp() if x[1] else 0),   # last_seen DESC (newest first)
-                -(x[2].timestamp() if x[2] else 0)    # created_at DESC (newest first)
+                -(x[2].timestamp() if x[2] else 0),   # created_at DESC (newest first)
+                x[0].id  # user.id ASC (tie-breaker for stable sorting)
             )
         )
 
@@ -807,10 +811,33 @@ async def search_users_by_name(
     
     query = select(User).where(
         or_(*conditions)
-    ).offset(offset).limit(limit)
+    )
     
+    # Execute query and get all matching users
     result = await session.execute(query)
-    return list(result.scalars().all())
+    all_users = list(result.scalars().all())
+    
+    # Sort users for consistent pagination:
+    # 1. last_seen DESC (newest visit first)
+    # 2. created_at DESC (newest user first)
+    # 3. user.id ASC (tie-breaker for stable sorting)
+    processed = []
+    for u in all_users:
+        last_seen = u.last_seen
+        created_at = u.created_at
+        processed.append((u, last_seen, created_at))
+    
+    processed.sort(
+        key=lambda x: (
+            -(x[1].timestamp() if x[1] else 0),   # last_seen DESC
+            -(x[2].timestamp() if x[2] else 0),   # created_at DESC
+            x[0].id  # user.id ASC (tie-breaker for stable sorting)
+        )
+    )
+    
+    # Apply offset and limit after sorting
+    sorted_users = [u[0] for u in processed]
+    return sorted_users[offset:offset + limit]
 
 
 # ============= ChatRoom CRUD =============

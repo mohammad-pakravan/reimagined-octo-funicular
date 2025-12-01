@@ -103,7 +103,7 @@ async def get_user_status(telegram_id: int, activity_tracker: Optional[UserActiv
                 # Check if last_seen is within 15 minutes
                 now = datetime.utcnow()
                 time_diff = (now - user.last_seen).total_seconds()
-                is_online = time_diff < 900
+                is_online = time_diff < 2700
                 return is_online, user.last_seen
         except Exception:
             pass
