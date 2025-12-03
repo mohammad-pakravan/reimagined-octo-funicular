@@ -5,7 +5,7 @@ Separate file for better organization.
 from datetime import datetime, timedelta
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, case
 from db.models import VirtualProfile, User
 import random
 import hashlib
@@ -260,6 +260,87 @@ async def create_virtual_profile_from_real_users(
     return virtual_profile
 
 
+async def get_offline_real_female_profile(
+    session: AsyncSession,
+    user_age: Optional[int] = None,
+    user_city: Optional[str] = None,
+    user_province: Optional[str] = None,
+    exclude_user_ids: Optional[List[int]] = None,
+    activity_tracker = None,
+) -> Optional[User]:
+    """
+    Get an offline real female profile (offline for more than 24 hours).
+    Returns the User object, not a VirtualProfile.
+    """
+    from sqlalchemy import and_
+    
+    # Calculate 24 hours ago
+    twenty_four_hours_ago = datetime.utcnow() - timedelta(hours=24)
+    
+    # Query for real female users who are offline for more than 24 hours
+    query = select(User).where(
+        User.gender == "female",
+        User.is_active == True,
+        User.is_banned == False,
+        User.is_virtual == False,  # Only real users
+        User.display_name.isnot(None),
+        # Offline for more than 24 hours
+        or_(
+            User.last_seen.is_(None),
+            User.last_seen < twenty_four_hours_ago
+        )
+    )
+    
+    # Filter by age if provided (±3 years)
+    if user_age and 18 <= user_age <= 35:
+        min_age = max(18, user_age - 3)
+        max_age = min(35, user_age + 3)
+        query = query.where(User.age >= min_age, User.age <= max_age)
+    else:
+        query = query.where(User.age >= 18, User.age <= 35)
+    
+    # Filter by city/province if provided
+    if user_city:
+        query = query.where(User.city == user_city)
+    if user_province:
+        query = query.where(User.province == user_province)
+    
+    # Exclude recently used profiles
+    if exclude_user_ids:
+        query = query.where(User.id.notin_(exclude_user_ids))
+    
+    # Order by last_seen (oldest first) to prioritize most offline users
+    query = query.order_by(
+        case((User.last_seen.is_(None), 0), else_=1),  # NULL values first
+        User.last_seen.asc()
+    ).limit(50)  # Get a pool to choose from
+    
+    result = await session.execute(query)
+    offline_users = list(result.scalars().all())
+    
+    logger.info(f"Found {len(offline_users)} offline real female users (age_filter={user_age is not None}, city={user_city}, province={user_province}, excluded={len(exclude_user_ids or [])})")
+    
+    if not offline_users:
+        return None
+    
+    # Randomly select one from the pool to add variety
+    selected_user = random.choice(offline_users)
+    
+    # Update last_seen to make it appear online temporarily
+    selected_user.last_seen = datetime.utcnow()
+    await session.commit()
+    await session.refresh(selected_user)
+    
+    # Set online status in Redis
+    if activity_tracker:
+        try:
+            await activity_tracker.update_activity(selected_user.telegram_id, db_session=None)
+        except Exception:
+            pass
+    
+    return selected_user
+
+
 async def get_or_create_virtual_profile(
     session: AsyncSession,
     user_age: Optional[int] = None,
@@ -268,39 +349,89 @@ async def get_or_create_virtual_profile(
     exclude_profile_ids: Optional[List[int]] = None,
     activity_tracker = None,
     gender: str = "female",  # "female" or "male"
-    always_create_new: bool = True,  # Always create new profile for maximum variety
+    always_create_new: bool = False,  # Changed to False to use real profiles first
 ) -> VirtualProfile:
     """
     Get an available virtual profile or create a new one if none available.
-    This is the main function to use for getting virtual profiles.
-    
-    With always_create_new=True, we always create a fresh profile to ensure maximum variety.
+    Now prioritizes using real offline female profiles instead of creating new virtual ones.
     """
-    # If always_create_new is True, skip checking for existing profiles and create new one
+    # First, try to get an offline real female profile
+    if gender == "female":
+        # Convert exclude_profile_ids to exclude_user_ids by getting user_ids from VirtualProfile
+        exclude_user_ids = []
+        if exclude_profile_ids:
+            exclude_profile_query = select(VirtualProfile.user_id).where(
+                VirtualProfile.id.in_(exclude_profile_ids)
+            )
+            exclude_result = await session.execute(exclude_profile_query)
+            exclude_user_ids = [row[0] for row in exclude_result.all()]
+        
+        offline_user = await get_offline_real_female_profile(
+            session,
+            user_age=user_age,
+            user_city=user_city,
+            user_province=user_province,
+            exclude_user_ids=exclude_user_ids,
+            activity_tracker=activity_tracker,
+        )
+        
+        if offline_user:
+            # Check if a VirtualProfile already exists for this user
+            existing_virtual_profile = await session.execute(
+                select(VirtualProfile).where(VirtualProfile.user_id == offline_user.id)
+            )
+            existing_profile = existing_virtual_profile.scalar_one_or_none()
+            
+            if existing_profile:
+                # Use existing VirtualProfile
+                await mark_virtual_profile_as_used(session, existing_profile.id)
+                logger.info(f"Using existing VirtualProfile {existing_profile.id} for real user {offline_user.id}")
+                return existing_profile
+            else:
+                # Create a new VirtualProfile entry pointing to the real user
+                # This allows us to use real profiles without changing is_virtual flag
+                virtual_profile = VirtualProfile(
+                    user_id=offline_user.id,
+                    display_name=offline_user.display_name or "کاربر",
+                    age=offline_user.age or 25,
+                    province=offline_user.province or "",
+                    city=offline_user.city or "",
+                    profile_image_url=offline_user.profile_image_url,
+                    like_count=offline_user.like_count or 0,
+                    profile_id=offline_user.profile_id or hashlib.md5(f"virtual_{offline_user.telegram_id}".encode()).hexdigest()[:12],
+                    is_active=True,
+                    usage_count=0,
+                    last_used_at=None,
+                )
+                session.add(virtual_profile)
+                await session.commit()
+                await session.refresh(virtual_profile)
+                
+                await mark_virtual_profile_as_used(session, virtual_profile.id)
+                logger.info(f"Created VirtualProfile {virtual_profile.id} for real offline user {offline_user.id}")
+                return virtual_profile
+    
+    # Fallback: If no offline real profile found, try existing virtual profiles
     if not always_create_new:
-        # Try to get existing profile
         profile = await get_available_virtual_profile(
             session,
             user_age=user_age,
             user_city=user_city,
             user_province=user_province,
             exclude_profile_ids=exclude_profile_ids,
-            gender=gender  # Filter by desired gender
+            gender=gender
         )
         
         if profile:
-            # Mark as used
             await mark_virtual_profile_as_used(session, profile.id)
             
             # Update last_seen for virtual user and set online status
-            # Get the user separately to avoid lazy loading issues
             from db.models import User
             virtual_user = await session.get(User, profile.user_id)
             if virtual_user:
                 virtual_user.last_seen = datetime.utcnow()
                 await session.commit()
                 
-                # Set online status in Redis (outside of SQLAlchemy session)
                 if activity_tracker:
                     try:
                         await activity_tracker.update_activity(virtual_user.telegram_id, db_session=None)
@@ -309,21 +440,18 @@ async def get_or_create_virtual_profile(
             
             return profile
     
-    # Create new profile (either because always_create_new=True or no existing profile found)
-    logger.info(f"Creating NEW virtual profile (always_create_new={always_create_new}, gender={gender})")
+    # Last resort: Create new virtual profile
+    logger.info(f"Creating NEW virtual profile (no offline real users found, gender={gender})")
     profile = await create_virtual_profile_from_real_users(
         session,
         user_age=user_age,
         user_city=user_city,
         user_province=user_province,
-        gender=gender  # Use specified gender
+        gender=gender
     )
     
-    # Mark as used immediately
     await mark_virtual_profile_as_used(session, profile.id)
     
-    # Set online status for newly created profile
-    # Get the user separately to avoid lazy loading issues
     from db.models import User
     virtual_user = await session.get(User, profile.user_id)
     if virtual_user and activity_tracker:

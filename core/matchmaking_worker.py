@@ -266,7 +266,7 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             await matchmaking_queue.remove_user_from_queue(user2_telegram_id)
             
             # Notify both users and deduct coins if needed
-            from db.crud import check_user_premium, get_user_points
+            from db.crud import check_user_premium, get_user_points, spend_points
             from core.points_manager import PointsManager
             from db.crud import get_system_setting_value
             
@@ -274,8 +274,7 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             user1_premium = await check_user_premium(db_session, user1.id)
             user2_premium = await check_user_premium(db_session, user2.id)
             
-            # Get filtered chat cost from database (non-refundable)
-            from db.crud import get_system_setting_value
+            # Get filtered chat cost from database
             filtered_chat_cost_str = await get_system_setting_value(db_session, 'filtered_chat_cost', '1')
             try:
                 filtered_chat_cost = int(filtered_chat_cost_str)
@@ -286,12 +285,47 @@ async def connect_users(user1_telegram_id: int, user2_telegram_id: int):
             user1_points = await get_user_points(db_session, user1.id)
             user2_points = await get_user_points(db_session, user2.id)
             
-            # Deduct coins for non-premium users with filtered chat
-            # NEW LOGIC: 
-            # - If preferred_gender is "male" or "female" (filtered) -> deduct FILTERED_CHAT_COST only after chat success
+            # Deduct coins immediately upon connection for non-premium users with filtered chat
+            # - If preferred_gender is "male" or "female" (filtered) -> deduct FILTERED_CHAT_COST immediately
             # - If preferred_gender is None (random) -> FREE
             user1_coins_deducted = False
             user2_coins_deducted = False
+            
+            # Deduct coins for user1 if they have filtered chat preference
+            if not user1_premium and user1_pref_gender is not None:
+                if user1_points >= filtered_chat_cost:
+                    success = await spend_points(
+                        db_session,
+                        user1.id,
+                        filtered_chat_cost,
+                        "spent",
+                        "filtered_chat",
+                        f"Cost for filtered chat connection (non-refundable)"
+                    )
+                    if success:
+                        user1_coins_deducted = True
+                        user1_points -= filtered_chat_cost
+                        logger.info(f"User {user1_telegram_id}: Deducted {filtered_chat_cost} coins immediately upon connection, remaining: {user1_points}")
+                        # Mark cost as deducted in Redis
+                        await chat_manager.set_chat_cost_deducted(chat_room.id, user1.id, True)
+            
+            # Deduct coins for user2 if they have filtered chat preference
+            if not user2_premium and user2_pref_gender is not None:
+                if user2_points >= filtered_chat_cost:
+                    success = await spend_points(
+                        db_session,
+                        user2.id,
+                        filtered_chat_cost,
+                        "spent",
+                        "filtered_chat",
+                        f"Cost for filtered chat connection (non-refundable)"
+                    )
+                    if success:
+                        user2_coins_deducted = True
+                        user2_points -= filtered_chat_cost
+                        logger.info(f"User {user2_telegram_id}: Deducted {filtered_chat_cost} coins immediately upon connection, remaining: {user2_points}")
+                        # Mark cost as deducted in Redis
+                        await chat_manager.set_chat_cost_deducted(chat_room.id, user2.id, True)
             
             # Helper function to generate cost summary for match found
             def get_match_cost_summary(is_premium, pref_gender, coins_deducted, cost, points):

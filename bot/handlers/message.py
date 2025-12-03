@@ -210,6 +210,9 @@ async def handle_reply_message(message: Message, state: FSMContext):
             # Silently ignore messages to virtual profiles - simulate that they're not responding
             return
         
+        # Store partner in variable accessible in exception handler (before try block)
+        partner_for_error = partner
+        
         # Get partner's Telegram ID
         partner_telegram_id = await chat_manager.get_partner_telegram_id(user.id, db_session)
         if not partner_telegram_id:
@@ -361,6 +364,14 @@ async def handle_reply_message(message: Message, state: FSMContext):
             await bot.session.close()
         except Exception as e:
             await chat_manager.redis.decr(chat_manager._get_message_count_key(chat_room.id, user.id))
+            # Check if partner is virtual or error is "chat not found" - silently ignore errors for virtual profiles
+            error_str = str(e).lower()
+            if partner_for_error and partner_for_error.is_virtual:
+                # Silently ignore errors for virtual profiles
+                return
+            if "chat not found" in error_str:
+                # Silently ignore "chat not found" errors (can happen with virtual profiles)
+                return
             await message.answer(f"❌ خطا در ارسال پیام: {str(e)}\n\nلطفاً دوباره تلاش کنید.")
         
         break
@@ -495,6 +506,9 @@ async def forward_message(message: Message, state: FSMContext):
             return
         
         # Forward message based on type
+        # Store partner_id and partner in variables accessible in exception handler
+        partner_id_for_error = partner_id
+        partner_for_error = partner
         try:
             from aiogram import Bot
             bot = Bot(token=settings.BOT_TOKEN)
@@ -592,6 +606,15 @@ async def forward_message(message: Message, state: FSMContext):
         except Exception as e:
             # If message sending fails, decrement message count
             await chat_manager.redis.decr(chat_manager._get_message_count_key(chat_room.id, user.id))
+            
+            # Check if partner is virtual or error is "chat not found" - silently ignore errors for virtual profiles
+            error_str = str(e).lower()
+            if partner_for_error and partner_for_error.is_virtual:
+                # Silently ignore errors for virtual profiles
+                return
+            if "chat not found" in error_str:
+                # Silently ignore "chat not found" errors (can happen with virtual profiles)
+                return
             
             await message.answer(f"❌ خطا در ارسال پیام: {str(e)}\n\nلطفاً دوباره تلاش کنید.")
         

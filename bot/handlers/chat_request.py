@@ -408,8 +408,7 @@ async def accept_chat_request(callback: CallbackQuery):
             try:
                 chat_room = await chat_manager.create_chat(user.id, requester.id, db_session, None, None)
                 
-                # Chat created successfully, now notify users
-                # If notification fails, it's not critical - chat is already created
+                # Chat created successfully, now deduct coins immediately upon connection
                 bot = Bot(token=settings.BOT_TOKEN)
                 notification_errors = []
                 
@@ -421,19 +420,48 @@ async def accept_chat_request(callback: CallbackQuery):
                 user_premium = await check_user_premium(db_session, user.id)
                 requester_premium = await check_user_premium(db_session, requester.id)
                 
-                # Get chat cost from system settings
-                chat_cost_str = await get_system_setting_value(db_session, 'chat_message_cost', '3')
-                try:
-                    chat_cost = int(chat_cost_str)
-                except (ValueError, TypeError):
-                    chat_cost = 3
+                # Get chat request cost from system settings
+                chat_request_cost = settings.CHAT_REQUEST_COST
                 
                 # Get user points
                 user_points = await get_user_points(db_session, user.id)
                 requester_points = await get_user_points(db_session, requester.id)
                 
-                # Chat requests don't deduct coins (preferred_gender is None, meaning "all")
-                # So no coin deduction needed
+                # Deduct coins immediately upon connection for both users (if not premium)
+                user_coins_deducted = False
+                requester_coins_deducted = False
+                
+                # Deduct coins for user (accepter)
+                if not user_premium:
+                    if user_points >= chat_request_cost:
+                        success = await spend_points(
+                            db_session,
+                            user.id,
+                            chat_request_cost,
+                            "spent",
+                            "chat_request",
+                            f"Cost for accepting chat request from user {requester.id}"
+                        )
+                        if success:
+                            user_coins_deducted = True
+                            user_points -= chat_request_cost
+                            await chat_manager.set_chat_cost_deducted(chat_room.id, user.id, True)
+                
+                # Deduct coins for requester
+                if not requester_premium:
+                    if requester_points >= chat_request_cost:
+                        success = await spend_points(
+                            db_session,
+                            requester.id,
+                            chat_request_cost,
+                            "spent",
+                            "chat_request",
+                            f"Cost for chat request connection to user {user.id}"
+                        )
+                        if success:
+                            requester_coins_deducted = True
+                            requester_points -= chat_request_cost
+                            await chat_manager.set_chat_cost_deducted(chat_room.id, requester.id, True)
                 
                 # Prepare messages with beautiful UI
                 user_msg = (
@@ -452,10 +480,13 @@ async def accept_chat_request(callback: CallbackQuery):
                         "💎 وضعیت: پریمیوم\n"
                         "💰 هزینه این چت: رایگان\n\n"
                     )
+                elif user_coins_deducted:
+                    user_msg += (
+                        f"💰 {chat_request_cost} سکه کسر شد (باقی‌مانده: {user_points})\n\n"
+                    )
                 else:
                     user_msg += (
-                        "💰 هزینه این چت: رایگان\n"
-                        "🌐 چون از طریق درخواست چت شروع شد، هیچ سکه‌ای کسر نمی‌شه.\n\n"
+                        f"💡 هزینه این چت {chat_request_cost} سکه است.\n\n"
                     )
                 
                 if requester_premium:
@@ -463,10 +494,13 @@ async def accept_chat_request(callback: CallbackQuery):
                         "💎 وضعیت: پریمیوم\n"
                         "💰 هزینه این چت: رایگان\n\n"
                     )
+                elif requester_coins_deducted:
+                    requester_msg += (
+                        f"💰 {chat_request_cost} سکه کسر شد (باقی‌مانده: {requester_points})\n\n"
+                    )
                 else:
                     requester_msg += (
-                        "💰 هزینه این چت: رایگان\n"
-                        "🌐 چون از طریق درخواست چت شروع شد، هیچ سکه‌ای کسر نمی‌شه.\n\n"
+                        f"💡 هزینه این چت {chat_request_cost} سکه است.\n\n"
                     )
                 
                 
