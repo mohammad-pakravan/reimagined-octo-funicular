@@ -51,7 +51,8 @@ class ChatManager:
         user2_id: int,
         db_session,
         user1_preferred_gender: Optional[str] = None,
-        user2_preferred_gender: Optional[str] = None
+        user2_preferred_gender: Optional[str] = None,
+        is_virtual_profile: bool = False  # New parameter to indicate if user2 is a virtual profile
     ) -> ChatRoom:
         """
         Create a new chat room.
@@ -62,6 +63,7 @@ class ChatManager:
             db_session: Database session
             user1_preferred_gender: First user's preferred gender (None means "all")
             user2_preferred_gender: Second user's preferred gender (None means "all")
+            is_virtual_profile: Whether user2 is a virtual profile (used for real offline users as virtual)
             
         Returns:
             Created ChatRoom object
@@ -98,6 +100,11 @@ class ChatManager:
         # Store private mode status (protect_content) for each user (default: False)
         await self.redis.setex(f"chat:private_mode:{chat_room.id}:{user1_id}", 86400, "0")
         await self.redis.setex(f"chat:private_mode:{chat_room.id}:{user2_id}", 86400, "0")
+        
+        # Store virtual profile flag for user2 (indicates this is a virtual profile chat)
+        # This is important because we use real user profiles as virtual profiles
+        if is_virtual_profile:
+            await self.redis.setex(f"chat:is_virtual:{chat_room.id}:{user2_id}", 86400, "1")
         
         return chat_room
     
@@ -236,6 +243,49 @@ class ChatManager:
             return partner_user.telegram_id
         
         return None
+    
+    async def is_partner_virtual_profile(
+        self,
+        user_id: int,
+        partner_id: int,
+        db_session
+    ) -> bool:
+        """
+        Check if partner is a virtual profile in the current chat room.
+        This is important because we use real user profiles as virtual profiles.
+        
+        Args:
+            user_id: Current user's database ID
+            partner_id: Partner's database ID
+            db_session: Database session
+            
+        Returns:
+            True if partner is a virtual profile, False otherwise
+        """
+        # First check Redis flag (fastest)
+        chat_room = await get_active_chat_room_by_user(db_session, user_id)
+        if chat_room:
+            virtual_flag = await self.redis.get(f"chat:is_virtual:{chat_room.id}:{partner_id}")
+            if virtual_flag and virtual_flag.decode() == "1":
+                return True
+        
+        # Fallback: Check if partner has a VirtualProfile entry
+        # This handles cases where real users are used as virtual profiles
+        from sqlalchemy import select
+        from db.models import VirtualProfile
+        result = await db_session.execute(
+            select(VirtualProfile).where(VirtualProfile.user_id == partner_id)
+        )
+        virtual_profile = result.scalar_one_or_none()
+        if virtual_profile and virtual_profile.is_active:
+            return True
+        
+        # Also check if partner is marked as virtual in User table
+        partner_user = await get_user_by_id(db_session, partner_id)
+        if partner_user and partner_user.is_virtual:
+            return True
+        
+        return False
     
     async def increment_message_count(
         self,

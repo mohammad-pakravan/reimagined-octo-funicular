@@ -653,6 +653,7 @@ async def check_matchmaking_timeout_with_virtual(
                         db_session=db_session,
                         user1_preferred_gender=preferred_gender if preferred_gender else None,  # Use actual preferred_gender or None
                         user2_preferred_gender=None,  # Virtual profile always uses "all" (free)
+                        is_virtual_profile=True,  # Mark that user2 is a virtual profile
                     )
                     logger.info(f"Created chat room {chat_room.id} between user {user.id} and virtual profile {virtual_profile.id} (user_id={virtual_profile.user_id})")
                     

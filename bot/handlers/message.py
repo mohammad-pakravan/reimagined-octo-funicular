@@ -206,12 +206,20 @@ async def handle_reply_message(message: Message, state: FSMContext):
         # Check if partner is a virtual profile - don't send messages to virtual profiles
         from db.crud import get_user_by_id
         partner = await get_user_by_id(db_session, partner_id)
-        if partner and partner.is_virtual:
+        
+        # Check if partner is a virtual profile (using chat_manager method)
+        # This is important because we use real user profiles as virtual profiles
+        is_virtual = False
+        if partner and chat_manager:
+            is_virtual = await chat_manager.is_partner_virtual_profile(user.id, partner_id, db_session)
+        
+        if is_virtual or (partner and partner.is_virtual):
             # Silently ignore messages to virtual profiles - simulate that they're not responding
             return
         
         # Store partner in variable accessible in exception handler (before try block)
         partner_for_error = partner
+        partner_is_virtual_for_error = is_virtual
         
         # Get partner's Telegram ID
         partner_telegram_id = await chat_manager.get_partner_telegram_id(user.id, db_session)
@@ -364,13 +372,13 @@ async def handle_reply_message(message: Message, state: FSMContext):
             await bot.session.close()
         except Exception as e:
             await chat_manager.redis.decr(chat_manager._get_message_count_key(chat_room.id, user.id))
-            # Check if partner is virtual or error is "chat not found" - silently ignore errors for virtual profiles
+            # Check if partner is virtual or error is "chat not found" or "bot was blocked" - silently ignore errors for virtual profiles
             error_str = str(e).lower()
-            if partner_for_error and partner_for_error.is_virtual:
+            if partner_is_virtual_for_error or (partner_for_error and partner_for_error.is_virtual):
                 # Silently ignore errors for virtual profiles
                 return
-            if "chat not found" in error_str:
-                # Silently ignore "chat not found" errors (can happen with virtual profiles)
+            if "chat not found" in error_str or "bot was blocked" in error_str or "forbidden" in error_str:
+                # Silently ignore "chat not found" or "bot was blocked" errors (can happen with virtual profiles or blocked users)
                 return
             await message.answer(f"❌ خطا در ارسال پیام: {str(e)}\n\nلطفاً دوباره تلاش کنید.")
         
@@ -467,7 +475,14 @@ async def forward_message(message: Message, state: FSMContext):
         # Check if partner is a virtual profile - don't send messages to virtual profiles
         from db.crud import get_user_by_id
         partner = await get_user_by_id(db_session, partner_id)
-        if partner and partner.is_virtual:
+        
+        # Check if partner is a virtual profile (using chat_manager method)
+        # This is important because we use real user profiles as virtual profiles
+        is_virtual = False
+        if partner and chat_manager:
+            is_virtual = await chat_manager.is_partner_virtual_profile(user.id, partner_id, db_session)
+        
+        if is_virtual or (partner and partner.is_virtual):
             # Silently ignore messages to virtual profiles - simulate that they're not responding
             return
         
@@ -607,13 +622,13 @@ async def forward_message(message: Message, state: FSMContext):
             # If message sending fails, decrement message count
             await chat_manager.redis.decr(chat_manager._get_message_count_key(chat_room.id, user.id))
             
-            # Check if partner is virtual or error is "chat not found" - silently ignore errors for virtual profiles
+            # Check if partner is virtual or error is "chat not found" or "bot was blocked" - silently ignore errors for virtual profiles
             error_str = str(e).lower()
-            if partner_for_error and partner_for_error.is_virtual:
+            if partner_is_virtual_for_error or (partner_for_error and partner_for_error.is_virtual):
                 # Silently ignore errors for virtual profiles
                 return
-            if "chat not found" in error_str:
-                # Silently ignore "chat not found" errors (can happen with virtual profiles)
+            if "chat not found" in error_str or "bot was blocked" in error_str or "forbidden" in error_str:
+                # Silently ignore "chat not found" or "bot was blocked" errors (can happen with virtual profiles or blocked users)
                 return
             
             await message.answer(f"❌ خطا در ارسال پیام: {str(e)}\n\nلطفاً دوباره تلاش کنید.")
